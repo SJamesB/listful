@@ -1,98 +1,90 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
+import { useState } from 'react';
+import { ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { CATEGORIES } from '@/lib/logCategories';
+import { LogPage } from '@/screens/LogPage';
+import EntertainmentPage from '@/screens/entertainment';
+import HabitsPage from '@/screens/habits';
+import TodoPage from '@/screens/todo';
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
+// Stable wrappers so LogPage hooks don't remount on every render
+const GigsPage        = () => <LogPage config={CATEGORIES.gig} />;
+const BooksLogPage    = () => <LogPage config={CATEGORIES.book} />;
+const TeaPage         = () => <LogPage config={CATEGORIES.tea} />;
+const ChiliPage       = () => <LogPage config={CATEGORIES.chili} />;
+const CountriesPage   = () => <LogPage config={CATEGORIES.country} />;
+const WildlifePage    = () => <LogPage config={CATEGORIES.wildlife} />;
+
+const PAGES = [
+  HabitsPage,
+  TodoPage,
+  EntertainmentPage,
+  GigsPage,
+  BooksLogPage,
+  TeaPage,
+  ChiliPage,
+  CountriesPage,
+  WildlifePage,
+];
+
+export default function App() {
+  const { width } = useWindowDimensions();
+  const [page, setPage] = useState(0);
+  const [pagerH, setPagerH] = useState(0);
+
   return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
+    <SafeAreaView style={styles.root}>
+      <View
+        style={{ flex: 1 }}
+        onLayout={(e) => setPagerH(e.nativeEvent.layout.height)}>
+        {pagerH > 0 && (
+          <ScrollView
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            scrollEventThrottle={32}
+            onMomentumScrollEnd={(e) =>
+              setPage(Math.round(e.nativeEvent.contentOffset.x / width))
+            }>
+            {PAGES.map((Page, i) => (
+              <View key={i} style={{ width, height: pagerH }}>
+                <Page />
+              </View>
+            ))}
+          </ScrollView>
+        )}
 
-export default function HomeScreen() {
-  return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
-
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
-
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
-
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+        {PAGES.length > 1 && (
+          <View style={styles.dots}>
+            {PAGES.map((_, i) => (
+              <View key={i} style={[styles.dot, i === page && styles.dotActive]} />
+            ))}
+          </View>
+        )}
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
+  root: { flex: 1 },
+  dots: {
+    position: 'absolute',
+    bottom: 14,
+    left: 0,
+    right: 0,
     flexDirection: 'row',
-  },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
-  },
-  heroSection: {
-    alignItems: 'center',
     justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
+    gap: 6,
   },
-  title: {
-    textAlign: 'center',
+  dot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.45)',
   },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+  dotActive: {
+    backgroundColor: 'rgba(255,255,255,0.9)',
   },
 });
