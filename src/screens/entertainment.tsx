@@ -12,11 +12,7 @@ import DraggableFlatList, {
   ScaleDecorator,
 } from 'react-native-draggable-flatlist';
 
-import { PageBackground } from '@/components/PageBackground';
 import { supabase } from '@/lib/supabase';
-
-const BG1 = ['#A5B4FC', '#C084FC', '#67E8F9', '#A78BFA'] as const;
-const BG2 = ['#F0ABFC', '#FDE68A', 'transparent'] as const;
 
 const C = {
   text: '#1A1626',
@@ -149,10 +145,10 @@ export default function EntertainmentPage() {
             </View>
             <View style={{ flexDirection: 'row', gap: 16 }}>
               <Pressable onPress={() => setEditingId(null)}>
-                <Text style={{ fontSize: 12, color: C.muted }}>cancel</Text>
+                <Text style={{ fontSize: 14, color: C.muted }}>cancel</Text>
               </Pressable>
               <Pressable onPress={saveEdit}>
-                <Text style={{ fontSize: 12, color: C.accent, fontWeight: '600' }}>save</Text>
+                <Text style={{ fontSize: 14, color: C.accent, fontWeight: '600' }}>save</Text>
               </Pressable>
             </View>
           </View>
@@ -173,7 +169,7 @@ export default function EntertainmentPage() {
 
   const header = (
     <View style={styles.block}>
-      <Text style={styles.title}>Entertainment</Text>
+      <Text style={styles.title}>🦚 La Dolce Vita</Text>
       {items.length === 0 && !adding && (
         <Text style={styles.empty}>nothing on the list</Text>
       )}
@@ -236,7 +232,6 @@ export default function EntertainmentPage() {
 
   return (
     <View style={styles.root}>
-      <PageBackground layer1={BG1} layer2={BG2} opacity2={0.5} />
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={C.accent} /></View>
       ) : (
@@ -248,6 +243,7 @@ export default function EntertainmentPage() {
           ListHeaderComponent={header}
           ListFooterComponent={footer}
           contentContainerStyle={styles.list}
+          containerStyle={styles.fill}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           activationDistance={5}
@@ -261,6 +257,7 @@ const ROW_MAX = 400;
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  fill: { flex: 1 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   list: { paddingBottom: 64 },
   block: {
@@ -273,7 +270,7 @@ const styles = StyleSheet.create({
     fontSize: 17, fontWeight: '600', color: C.text,
     letterSpacing: -0.3, marginBottom: 20, marginTop: 60,
   },
-  empty: { fontSize: 11, color: C.muted, marginBottom: 16 },
+  empty: { fontSize: 13, color: C.muted, marginBottom: 16 },
   row: {
     flexDirection: 'row', alignItems: 'center',
     paddingVertical: 14, gap: 14,
@@ -284,14 +281,14 @@ const styles = StyleSheet.create({
     width: 18, height: 18, borderRadius: 9,
     borderWidth: 1.5, borderColor: 'rgba(26,22,38,0.3)',
   },
-  itemText: { flex: 1, fontSize: 11, color: C.text, fontWeight: '400', letterSpacing: -0.1 },
+  itemText: { flex: 1, fontSize: 14, color: C.text, fontWeight: '400', letterSpacing: -0.1 },
   badge: { borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2 },
-  badgeText: { fontSize: 9, color: C.text, fontWeight: '500' },
+  badgeText: { fontSize: 11, color: C.text, fontWeight: '500' },
   addRow: {
     paddingTop: 16,
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.border,
   },
-  addText: { fontSize: 11, color: C.muted, fontWeight: '500' },
+  addText: { fontSize: 14, color: C.muted, fontWeight: '500' },
   addForm: { gap: 14 },
   input: {
     fontSize: 16, color: C.text, paddingVertical: 2,
@@ -317,13 +314,13 @@ const styles = StyleSheet.create({
     paddingVertical: 14, marginTop: 8,
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.border,
   },
-  recentTitle: { fontSize: 11, fontWeight: '600', color: C.muted },
-  chevron: { fontSize: 9, color: C.muted },
+  recentTitle: { fontSize: 13, fontWeight: '600', color: C.muted },
+  chevron: { fontSize: 11, color: C.muted },
   recentRow: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border,
   },
-  recentText: { flex: 1, fontSize: 11, color: C.muted, textDecorationLine: 'line-through' },
+  recentText: { flex: 1, fontSize: 14, color: C.muted, textDecorationLine: 'line-through' },
   undo: { fontSize: 15, color: C.muted },
 });

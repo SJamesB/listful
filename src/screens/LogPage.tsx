@@ -9,7 +9,6 @@ import {
   View,
 } from 'react-native';
 
-import { PageBackground } from '@/components/PageBackground';
 import { type CategoryConfig } from '@/lib/logCategories';
 import { supabase } from '@/lib/supabase';
 
@@ -224,7 +223,6 @@ export function LogPage({ config }: Props) {
 
   return (
     <View style={styles.root}>
-      <PageBackground layer1={config.gradient1} layer2={config.gradient2} opacity2={0.5} />
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={config.accent} /></View>
       ) : (
