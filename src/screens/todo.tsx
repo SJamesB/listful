@@ -12,11 +12,7 @@ import DraggableFlatList, {
   ScaleDecorator,
 } from 'react-native-draggable-flatlist';
 
-import { PageBackground } from '@/components/PageBackground';
 import { supabase } from '@/lib/supabase';
-
-const BG1 = ['#FFD4A5', '#FFAABF', '#AAC8FF', '#AAFFD8'] as const;
-const BG2 = ['#FFFF99', 'transparent', '#FFAAEE'] as const;
 
 const C = {
   text: '#1E1826',
@@ -138,7 +134,7 @@ export default function TodoPage() {
 
   const header = (
     <View style={styles.block}>
-      <Text style={styles.title}>To Do</Text>
+      <Text style={styles.title}>🐝 To Do</Text>
       {items.length === 0 && !adding && (
         <Text style={styles.empty}>nothing to do</Text>
       )}
@@ -184,7 +180,6 @@ export default function TodoPage() {
 
   return (
     <View style={styles.root}>
-      <PageBackground layer1={BG1} layer2={BG2} opacity2={0.45} />
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={C.accent} /></View>
       ) : (
@@ -196,6 +191,7 @@ export default function TodoPage() {
           ListHeaderComponent={header}
           ListFooterComponent={footer}
           contentContainerStyle={styles.list}
+          containerStyle={styles.fill}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           activationDistance={5}
@@ -209,6 +205,7 @@ const ROW_MAX = 400;
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  fill: { flex: 1 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   list: { paddingBottom: 64 },
   block: {
@@ -221,7 +218,7 @@ const styles = StyleSheet.create({
     fontSize: 17, fontWeight: '600', color: C.text,
     letterSpacing: -0.3, marginBottom: 20, marginTop: 60,
   },
-  empty: { fontSize: 11, color: C.muted, marginBottom: 16 },
+  empty: { fontSize: 13, color: C.muted, marginBottom: 16 },
   row: {
     flexDirection: 'row', alignItems: 'center',
     paddingVertical: 14, gap: 16,
@@ -232,19 +229,19 @@ const styles = StyleSheet.create({
     width: 18, height: 18, borderRadius: 9,
     borderWidth: 1.5, borderColor: 'rgba(30,24,38,0.3)',
   },
-  itemText: { flex: 1, fontSize: 11, color: C.text, fontWeight: '400', letterSpacing: -0.1 },
+  itemText: { flex: 1, fontSize: 14, color: C.text, fontWeight: '400', letterSpacing: -0.1 },
   addRow: {
     paddingTop: 16,
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.border,
   },
-  addText: { fontSize: 11, color: C.muted, fontWeight: '500' },
+  addText: { fontSize: 14, color: C.muted, fontWeight: '500' },
   input: {
     fontSize: 16, color: C.text, paddingVertical: 2,
     borderBottomWidth: 1.5, borderBottomColor: C.accent,
     outlineStyle: 'none',
   } as any,
   editInput: {
-    flex: 1, fontSize: 11, color: C.text,
+    flex: 1, fontSize: 14, color: C.text,
     borderBottomWidth: 1, borderBottomColor: C.accent,
     outlineStyle: 'none',
   } as any,
@@ -253,13 +250,13 @@ const styles = StyleSheet.create({
     paddingVertical: 14, marginTop: 8,
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.border,
   },
-  recentTitle: { fontSize: 11, fontWeight: '600', color: C.muted },
-  chevron: { fontSize: 9, color: C.muted },
+  recentTitle: { fontSize: 13, fontWeight: '600', color: C.muted },
+  chevron: { fontSize: 11, color: C.muted },
   recentRow: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border,
   },
-  recentText: { flex: 1, fontSize: 11, color: C.muted, textDecorationLine: 'line-through' },
+  recentText: { flex: 1, fontSize: 14, color: C.muted, textDecorationLine: 'line-through' },
   undo: { fontSize: 15, color: C.muted },
 });
