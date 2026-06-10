@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -153,12 +154,144 @@ function CalendarSection() {
   );
 }
 
+// ─── History modal ───────────────────────────────────────────────────────────
+
+const WEEKDAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+
+function logKey(taskId: string, date: string): string {
+  return `${taskId}_${date}`;
+}
+
+interface HistoryModalProps {
+  visible: boolean;
+  onClose: () => void;
+  habits: RecurringTask[];
+}
+
+function HistoryModal({ visible, onClose, habits }: HistoryModalProps) {
+  const [logs, setLogs] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  const days = useMemo(() => {
+    const out: { date: string; dow: string; dom: number }[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(NOW);
+      d.setDate(NOW.getDate() - i);
+      out.push({ date: toDate(d), dow: WEEKDAY_LETTERS[d.getDay()], dom: d.getDate() });
+    }
+    return out;
+  }, []);
+
+  const rangeStart = days[0].date;
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(false);
+    const { data, error } = await supabase
+      .from('task_logs')
+      .select('task_id, log_date')
+      .gte('log_date', rangeStart)
+      .lte('log_date', TODAY);
+    if (error) { setError(true); setLoading(false); return; }
+    setLogs(new Set((data ?? []).map((l) => logKey(l.task_id, l.log_date))));
+    setLoading(false);
+  }, [rangeStart]);
+
+  useEffect(() => {
+    if (visible) load();
+  }, [visible, load]);
+
+  const toggle = async (taskId: string, date: string) => {
+    const key = logKey(taskId, date);
+    const has = logs.has(key);
+    setLogs((prev) => {
+      const next = new Set(prev);
+      if (has) next.delete(key); else next.add(key);
+      return next;
+    });
+    if (has) {
+      const { error } = await supabase
+        .from('task_logs').delete()
+        .eq('task_id', taskId).eq('log_date', date);
+      if (error) console.error('delete failed:', error.message);
+    } else {
+      const { error } = await supabase.from('task_logs').insert({
+        task_id: taskId, log_date: date, completed_at: new Date().toISOString(),
+      });
+      if (error) console.error('insert failed:', error.message);
+    }
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={hist.backdrop}>
+        <View style={hist.sheet}>
+          <View style={hist.header}>
+            <Text style={hist.heading}>History</Text>
+            <Pressable onPress={onClose} hitSlop={12}>
+              <Text style={hist.doneText}>Done</Text>
+            </Pressable>
+          </View>
+
+          <View style={hist.row}>
+            <View style={hist.labelCol} />
+            {days.map((d) => (
+              <View key={d.date} style={hist.dayCol}>
+                <Text style={[hist.dayDow, d.date === TODAY && hist.todayText]}>{d.dow}</Text>
+                <Text style={[hist.dayDom, d.date === TODAY && hist.todayText]}>{d.dom}</Text>
+              </View>
+            ))}
+          </View>
+
+          {loading ? (
+            <View style={hist.center}><ActivityIndicator color={C.done} /></View>
+          ) : error ? (
+            <View style={hist.center}>
+              <Text style={styles.stateText}>couldn't load</Text>
+              <Pressable onPress={load}><Text style={styles.retryText}>retry</Text></Pressable>
+            </View>
+          ) : (
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={hist.list}>
+              {habits.map((habit) => (
+                <View key={habit.id} style={hist.row}>
+                  <View style={hist.labelCol}>
+                    <Text style={hist.rowEmoji}>{resolveEmoji(habit.name, habit.emoji)}</Text>
+                    <Text style={hist.rowLabel} numberOfLines={1}>{habit.name.toLowerCase()}</Text>
+                  </View>
+                  {days.map((d) => {
+                    const done = logs.has(logKey(habit.id, d.date));
+                    return (
+                      <View key={d.date} style={hist.dayCol}>
+                        <Pressable
+                          onPress={() => toggle(habit.id, d.date)}
+                          hitSlop={4}
+                          style={({ pressed }) => [
+                            hist.cell,
+                            done && hist.cellDone,
+                            pressed && { opacity: 0.6 },
+                          ]}
+                        />
+                      </View>
+                    );
+                  })}
+                </View>
+              ))}
+            </ScrollView>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function HabitsPage() {
   const [habits, setHabits] = useState<HabitRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const load = useCallback(async () => {
     setError(false);
@@ -230,9 +363,22 @@ export default function HabitsPage() {
             ))}
           </View>
 
+          <Pressable
+            onPress={() => setHistoryOpen(true)}
+            style={({ pressed }) => [styles.historyBtn, pressed && { opacity: 0.7 }]}
+          >
+            <Text style={styles.historyBtnText}>History</Text>
+          </Pressable>
+
           {GOOGLE_REFRESH_TOKEN ? <CalendarSection /> : null}
         </ScrollView>
       )}
+
+      <HistoryModal
+        visible={historyOpen}
+        onClose={() => { setHistoryOpen(false); load(); }}
+        habits={habits}
+      />
     </View>
   );
 }
@@ -256,6 +402,60 @@ const styles = StyleSheet.create({
   label: { fontSize: 11, color: C.muted, fontWeight: '500', letterSpacing: 0.3 },
   stateText: { fontSize: 15, color: C.muted },
   retryText: { fontSize: 13, color: C.done, fontWeight: '500', padding: 10 },
+  historyBtn: {
+    marginTop: 28,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 14,
+    backgroundColor: C.surface,
+  },
+  historyBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: C.muted,
+    letterSpacing: 0.4,
+  },
+});
+
+const hist = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '80%',
+    paddingBottom: 24,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+  },
+  heading: { fontSize: 17, fontWeight: '700', color: C.text },
+  doneText: { fontSize: 15, fontWeight: '600', color: C.done },
+  center: { paddingVertical: 40, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  list: { paddingTop: 4, paddingBottom: 12 },
+  row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 20 },
+  labelCol: { width: 92, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  rowEmoji: { fontSize: 16 },
+  rowLabel: { flex: 1, fontSize: 12, fontWeight: '500', color: C.text },
+  dayCol: { flex: 1, alignItems: 'center' },
+  dayDow: { fontSize: 11, fontWeight: '600', color: C.muted, letterSpacing: 0.4 },
+  dayDom: { fontSize: 11, fontWeight: '600', color: C.muted, marginTop: 1 },
+  todayText: { color: C.done },
+  cell: {
+    width: 26,
+    height: 26,
+    borderRadius: 8,
+    backgroundColor: 'rgba(30,26,46,0.06)',
+  },
+  cellDone: { backgroundColor: C.done },
 });
 
 const cal = StyleSheet.create({

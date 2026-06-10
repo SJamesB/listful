@@ -1,18 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { FlatList, Platform, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PageBackground } from '@/components/PageBackground';
 import { SideDrawer } from '@/components/SideDrawer';
 import { makeConfig, type CategoryConfig } from '@/lib/logCategories';
+import { completeWebAuth } from '@/lib/spotify';
 import { supabase } from '@/lib/supabase';
 import { LogPage } from '@/screens/LogPage';
 import NotesPage from '@/screens/NotesPage';
+import CinemaPosterPage from '@/screens/CinemaPosterPage';
+import SpotifyPage from '@/screens/SpotifyPage';
+import SpotifyPlaylistPage from '@/screens/SpotifyPlaylistPage';
 import EntertainmentPage from '@/screens/entertainment';
 import HabitsPage from '@/screens/habits';
 import TodoPage from '@/screens/todo';
 
 const ORGANISE_COUNT = 3;
+// Three fixed cinema pages: To Watch (Film) + To Watch (TV) + Recents
+const CINEMA_FIXED = 3;
+// One fixed spotify page: main management view
+const SPOTIFY_FIXED = 1;
 
 const ORGANISE_BG = {
   layer1: ['#FBBFE8', '#C3B8FF', '#B8EEE4', '#FBBFE8'] as const,
@@ -26,12 +34,30 @@ const NOTES_BG = {
   layer1: ['#FEF9C3', '#FFFBEB', '#FEF3C7', '#FEF9C3'] as const,
   layer2: ['#FDE68A', 'transparent', '#D9F99D'] as const,
 };
+const CINEMA_BG = {
+  layer1: ['#EDE9FE', '#DDD6FE', '#C4B5FD', '#EDE9FE'] as const,
+  layer2: ['#A78BFA', 'transparent', '#7C3AED'] as const,
+};
+const SPOTIFY_BG = {
+  layer1: ['#D1FAE5', '#A7F3D0', '#6EE7B7', '#D1FAE5'] as const,
+  layer2: ['#34D399', 'transparent', '#059669'] as const,
+};
 
-type Section = 'organise' | 'vault' | 'notes';
+type Section = 'organise' | 'vault' | 'notes' | 'cinema' | 'spotify';
 
 interface SectionItem {
   id: string;
   Component: React.ComponentType;
+}
+
+interface CinemaList {
+  listId: string;
+  listName: string | null;
+}
+
+interface SpotifyPinnedPlaylist {
+  spotifyId: string;
+  name: string;
 }
 
 function HamburgerIcon() {
@@ -53,12 +79,41 @@ export default function App() {
   const insets = useSafeAreaInsets();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [vaultConfigs, setVaultConfigs] = useState<CategoryConfig[]>([]);
+  const [cinemaLists, setCinemaLists] = useState<CinemaList[]>([]);
+  const [spotifyPlaylists, setSpotifyPlaylists] = useState<SpotifyPinnedPlaylist[]>([]);
   const [currentSection, setCurrentSection] = useState<Section>('organise');
-  // Track the active page index within each section independently
-  const [sectionPage, setSectionPage] = useState({ organise: 0, vault: 0, notes: 0 });
+  const [sectionPage, setSectionPage] = useState({ organise: 0, vault: 0, notes: 0, cinema: 0, spotify: 0 });
   const [pagerHeight, setPagerHeight] = useState(0);
 
   const flatRef = useRef<FlatList<SectionItem>>(null);
+
+  // Handle Spotify OAuth redirect back to the web app (?code=...)
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    if (!code) return;
+    window.history.replaceState({}, '', window.location.pathname);
+    completeWebAuth(code)
+      .then(() => setCurrentSection('spotify'))
+      .catch((err) => console.warn('Spotify web auth failed:', err));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const loadSpotifyPlaylists = useCallback(() => {
+    supabase
+      .from('spotify_playlists')
+      .select('spotify_id, name, page_order')
+      .eq('pinned', true)
+      .order('page_order', { ascending: true })
+      .then(({ data }) => {
+        if (!data) return;
+        setSpotifyPlaylists(data.map((r) => ({ spotifyId: r.spotify_id, name: r.name })));
+      });
+  }, []);
+
+  // Stable ref so SpotifyPage's cached closure always calls the latest version
+  const loadSpotifyRef = useRef(loadSpotifyPlaylists);
+  loadSpotifyRef.current = loadSpotifyPlaylists;
 
   useEffect(() => {
     supabase
@@ -69,26 +124,98 @@ export default function App() {
         const keys = [...new Set(data.map((r) => r.category as string))].sort();
         setVaultConfigs(keys.map(makeConfig));
       });
-  }, []);
+
+    supabase
+      .from('imdb_items')
+      .select('list_id, list_name')
+      .eq('source', 'list')
+      .not('list_id', 'is', null)
+      .then(({ data }) => {
+        if (!data) return;
+        const seen = new Set<string>();
+        const unique: CinemaList[] = [];
+        for (const r of data) {
+          if (r.list_id && !seen.has(r.list_id)) {
+            seen.add(r.list_id);
+            unique.push({ listId: r.list_id, listName: r.list_name ?? null });
+          }
+        }
+        setCinemaLists(unique);
+      });
+
+    loadSpotifyPlaylists();
+  }, [loadSpotifyPlaylists]);
 
   // Cache vault page components by category key to prevent remounts
-  const compCache = useRef(new Map<string, React.ComponentType>());
+  const vaultCompCache = useRef(new Map<string, React.ComponentType>());
   const getVaultComponent = useCallback((config: CategoryConfig) => {
-    if (!compCache.current.has(config.key)) {
+    if (!vaultCompCache.current.has(config.key)) {
       const Comp = () => <LogPage config={config} />;
-      compCache.current.set(config.key, Comp);
+      vaultCompCache.current.set(config.key, Comp);
     }
-    return compCache.current.get(config.key)!;
+    return vaultCompCache.current.get(config.key)!;
   }, []);
+
+  // Cache cinema page components — keyed by page id, props are baked in at creation
+  const cinemaCompCache = useRef(new Map<string, React.ComponentType>());
+  const getCinemaComponent = useCallback(
+    (id: string, props: React.ComponentProps<typeof CinemaPosterPage>) => {
+      if (!cinemaCompCache.current.has(id)) {
+        const Comp = () => <CinemaPosterPage {...props} />;
+        cinemaCompCache.current.set(id, Comp);
+      }
+      return cinemaCompCache.current.get(id)!;
+    },
+    [],
+  );
 
   const vaultPageComponents = useMemo(
     () => vaultConfigs.map(getVaultComponent),
     [vaultConfigs, getVaultComponent],
   );
 
-  const notesPageIndex = ORGANISE_COUNT + vaultConfigs.length;
+  // Cache spotify page components
+  const spotifyCompCache = useRef(new Map<string, React.ComponentType>());
+  const getSpotifyComponent = useCallback(
+    (id: string, factory: () => React.ComponentType) => {
+      if (!spotifyCompCache.current.has(id)) {
+        spotifyCompCache.current.set(id, factory());
+      }
+      return spotifyCompCache.current.get(id)!;
+    },
+    [],
+  );
 
-  // Pages shown in the horizontal pager for the active section
+  const spotifyPageComponents = useMemo(() => [
+    getSpotifyComponent('spotify-main', () => () => (
+      <SpotifyPage onPinsChanged={() => loadSpotifyRef.current()} />
+    )),
+    ...spotifyPlaylists.map((p) =>
+      getSpotifyComponent(`spotify-${p.spotifyId}`, () => () => (
+        <SpotifyPlaylistPage title={p.name} spotifyId={p.spotifyId} />
+      )),
+    ),
+  ], [spotifyPlaylists, getSpotifyComponent]);
+
+  const cinemaPageComponents = useMemo(() => [
+    getCinemaComponent('film',    { title: '🎬 To Watch (Film)', source: 'watchlist', mediaType: 'Movie' }),
+    getCinemaComponent('tv',      { title: '📺 To Watch (TV)',   source: 'watchlist', mediaType: 'TV'    }),
+    getCinemaComponent('recents', { title: '⭐ Recents',          source: 'ratings'                       }),
+    ...cinemaLists.map((list) =>
+      getCinemaComponent(`list-${list.listId}`, {
+        title: list.listName ?? list.listId,
+        source: 'list',
+        listId: list.listId,
+      }),
+    ),
+  ], [cinemaLists, getCinemaComponent]);
+
+  const notesPageIndex    = ORGANISE_COUNT + vaultConfigs.length;
+  const cinemaStartIndex  = notesPageIndex + 1;
+  const cinemaTotalCount  = CINEMA_FIXED + cinemaLists.length;
+  const spotifyStartIndex = cinemaStartIndex + cinemaTotalCount;
+  const spotifyTotalCount = SPOTIFY_FIXED + spotifyPlaylists.length;
+
   const sectionData = useMemo<SectionItem[]>(() => {
     if (currentSection === 'organise') return [
       { id: 'habits',        Component: HabitsPage },
@@ -99,24 +226,53 @@ export default function App() {
       id: config.key,
       Component: vaultPageComponents[i],
     }));
-    return [{ id: 'notes', Component: NotesPage }];
-  }, [currentSection, vaultConfigs, vaultPageComponents]);
+    if (currentSection === 'cinema') return cinemaPageComponents.map((Component, i) => ({
+      id: `cinema-${i}`,
+      Component,
+    }));
+    if (currentSection === 'spotify') return spotifyPageComponents.map((Component, i) => ({
+      id: `spotify-${i}`,
+      Component,
+    }));
+    return [];
+  }, [currentSection, vaultConfigs, vaultPageComponents, cinemaPageComponents, spotifyPageComponents]);
 
-  // Global page index (used by drawer for active-item highlighting)
   const currentPage =
     currentSection === 'organise' ? sectionPage.organise :
     currentSection === 'vault'    ? ORGANISE_COUNT + sectionPage.vault :
+    currentSection === 'cinema'   ? cinemaStartIndex + sectionPage.cinema :
+    currentSection === 'spotify'  ? spotifyStartIndex + sectionPage.spotify :
     notesPageIndex;
 
   const bg =
     currentSection === 'organise' ? ORGANISE_BG :
     currentSection === 'vault'    ? VAULT_BG :
+    currentSection === 'cinema'   ? CINEMA_BG :
+    currentSection === 'spotify'  ? SPOTIFY_BG :
     NOTES_BG;
 
   const vaultMenuItems = useMemo(
     () => vaultConfigs.map((config, i) => ({ index: ORGANISE_COUNT + i, label: config.title })),
     [vaultConfigs],
   );
+
+  const spotifyMenuItems = useMemo(() => [
+    { index: spotifyStartIndex, label: '🎵 Music' },
+    ...spotifyPlaylists.map((p, i) => ({
+      index: spotifyStartIndex + SPOTIFY_FIXED + i,
+      label: p.name,
+    })),
+  ], [spotifyStartIndex, spotifyPlaylists]);
+
+  const cinemaMenuItems = useMemo(() => [
+    { index: cinemaStartIndex,     label: '🎬 To Watch (Film)' },
+    { index: cinemaStartIndex + 1, label: '📺 To Watch (TV)'   },
+    { index: cinemaStartIndex + 2, label: '⭐ Recents'          },
+    ...cinemaLists.map((list, i) => ({
+      index: cinemaStartIndex + CINEMA_FIXED + i,
+      label: list.listName ?? list.listId,
+    })),
+  ], [cinemaStartIndex, cinemaLists]);
 
   const navigateTo = useCallback((globalIndex: number) => {
     let newSection: Section;
@@ -127,22 +283,29 @@ export default function App() {
     } else if (globalIndex < notesPageIndex) {
       newSection = 'vault';
       localIndex = globalIndex - ORGANISE_COUNT;
+    } else if (globalIndex >= cinemaStartIndex && globalIndex < cinemaStartIndex + cinemaTotalCount) {
+      newSection = 'cinema';
+      localIndex = globalIndex - cinemaStartIndex;
+    } else if (globalIndex >= spotifyStartIndex && globalIndex < spotifyStartIndex + spotifyTotalCount) {
+      newSection = 'spotify';
+      localIndex = globalIndex - spotifyStartIndex;
     } else {
       newSection = 'notes';
       localIndex = 0;
     }
 
-    if (newSection === currentSection) {
-      // Same section — scroll imperatively so the FlatList doesn't remount
+    const isSamePaged = newSection === currentSection &&
+      (newSection === 'organise' || newSection === 'vault' || newSection === 'cinema' || newSection === 'spotify');
+
+    if (isSamePaged) {
       flatRef.current?.scrollToIndex({ index: localIndex, animated: false });
       setSectionPage((prev) => ({ ...prev, [newSection]: localIndex }));
     } else {
-      // Different section — update page first so initialScrollIndex is correct on remount
       setSectionPage((prev) => ({ ...prev, [newSection]: localIndex }));
       setCurrentSection(newSection);
     }
     setDrawerOpen(false);
-  }, [currentSection, notesPageIndex]);
+  }, [currentSection, notesPageIndex, cinemaStartIndex, cinemaTotalCount, spotifyStartIndex, spotifyTotalCount]);
 
   const getItemLayout = useCallback(
     (_: unknown, index: number) => ({ length: width, offset: width * index, index }),
@@ -158,6 +321,8 @@ export default function App() {
     [width, pagerHeight],
   );
 
+  const pagedSection = currentSection === 'organise' || currentSection === 'vault' || currentSection === 'cinema' || currentSection === 'spotify';
+
   return (
     <View style={styles.root}>
       <PageBackground layer1={bg.layer1} layer2={bg.layer2} />
@@ -171,7 +336,7 @@ export default function App() {
             // Android gesture handling never competes with Notes' inner pager
             <NotesPage />
           ) : (
-            pagerHeight > 0 && (
+            pagedSection && pagerHeight > 0 && (
               <>
                 <FlatList
                   key={currentSection}
@@ -184,7 +349,7 @@ export default function App() {
                   keyExtractor={(item) => item.id}
                   renderItem={renderItem}
                   getItemLayout={getItemLayout}
-                  initialScrollIndex={sectionPage[currentSection]}
+                  initialScrollIndex={sectionPage[currentSection as 'organise' | 'vault' | 'cinema']}
                   onMomentumScrollEnd={(e) => {
                     const idx = Math.round(e.nativeEvent.contentOffset.x / width);
                     setSectionPage((prev) => ({ ...prev, [currentSection]: idx }));
@@ -195,7 +360,10 @@ export default function App() {
                     {sectionData.map((_, i) => (
                       <View
                         key={i}
-                        style={[styles.dot, i === sectionPage[currentSection] && styles.dotActive]}
+                        style={[
+                          styles.dot,
+                          i === sectionPage[currentSection as 'organise' | 'vault' | 'cinema'] && styles.dotActive,
+                        ]}
                       />
                     ))}
                   </View>
@@ -223,6 +391,8 @@ export default function App() {
         onClose={() => setDrawerOpen(false)}
         vaultPages={vaultMenuItems}
         notesPageIndex={notesPageIndex}
+        cinemaPages={cinemaMenuItems}
+        spotifyPages={spotifyMenuItems}
       />
     </View>
   );
