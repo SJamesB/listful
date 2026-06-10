@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   FlatList,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -11,6 +12,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
 
 import { supabase } from '@/lib/supabase';
 
@@ -44,6 +46,7 @@ interface Note {
   title: string;
   content: string;
   created_at: string;
+  sort_order: number | null;
 }
 
 interface ArchivedNote extends Note {
@@ -64,25 +67,31 @@ function formatDate(iso: string) {
 // ─── Note card ───────────────────────────────────────────────────────────────
 
 function NoteCard({
-  note, width, onUpdate, onArchive, onDelete,
+  note, width, onUpdate, onArchive, onDelete, onReorder,
 }: {
   note: Note;
   width: number;
   onUpdate: (id: string, patch: Partial<Note>) => void;
   onArchive: (note: Note) => void;
   onDelete: (id: string) => void;
+  onReorder: () => void;
 }) {
   return (
     <View style={[styles.page, { width }]}>
       <View style={[styles.card, { backgroundColor: noteColor(note.id) }]}>
-        <TextInput
-          style={styles.titleInput}
-          value={note.title}
-          onChangeText={(v) => onUpdate(note.id, { title: v })}
-          placeholder="Title"
-          placeholderTextColor={C.muted}
-          returnKeyType="next"
-        />
+        <View style={styles.cardHeader}>
+          <TextInput
+            style={[styles.titleInput, styles.titleInputFlex]}
+            value={note.title}
+            onChangeText={(v) => onUpdate(note.id, { title: v })}
+            placeholder="Title"
+            placeholderTextColor={C.muted}
+            returnKeyType="next"
+          />
+          <Pressable onLongPress={onReorder} delayLongPress={300} hitSlop={10} style={styles.dragHandle}>
+            <Text style={styles.dragHandleText}>⠿</Text>
+          </Pressable>
+        </View>
         <View style={styles.cardDivider} />
         <TextInput
           style={styles.contentInput}
@@ -184,17 +193,20 @@ export default function NotesPage() {
   const [loading, setLoading] = useState(true);
   const [viewArchive, setViewArchive] = useState(false);
   const [archived, setArchived] = useState<ArchivedNote[]>([]);
+  const [reorderOpen, setReorderOpen] = useState(false);
 
   const flatRef = useRef<FlatList<ListItem>>(null);
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const creating = useRef(false);
   const currentIdxRef = useRef(0);
+  const reorderAnchorRef = useRef<string | null>(null);
 
   useEffect(() => {
     supabase
       .from('notes')
       .select('*')
-      .order('created_at')
+      .order('sort_order', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: true })
       .then(({ data }) => {
         setNotes(data ?? []);
         setLoading(false);
@@ -230,7 +242,7 @@ export default function NotesPage() {
     creating.current = true;
     const { data } = await supabase
       .from('notes')
-      .insert({ title: '', content: '' })
+      .insert({ title: '', content: '', sort_order: notes.length })
       .select()
       .single();
     creating.current = false;
@@ -288,13 +300,14 @@ export default function NotesPage() {
         title: note.title,
         content: note.content,
         created_at: note.created_at,
+        sort_order: notes.length,
       })
       .select()
       .single();
     await supabase.from('notes_archive').delete().eq('id', note.id);
     setArchived((prev) => prev.filter((n) => n.id !== note.id));
     if (data) setNotes((prev) => [...prev, data]);
-  }, []);
+  }, [notes.length]);
 
   const handleDeleteArchived = useCallback(async (id: string) => {
     await supabase.from('notes_archive').delete().eq('id', id);
@@ -311,23 +324,68 @@ export default function NotesPage() {
     [width],
   );
 
+  const openReorder = useCallback((noteId: string) => {
+    reorderAnchorRef.current = noteId;
+    setReorderOpen(true);
+  }, []);
+
+  const closeReorder = useCallback(() => {
+    setReorderOpen(false);
+    const anchor = reorderAnchorRef.current;
+    const idx = notes.findIndex((n) => n.id === anchor);
+    if (idx !== -1) {
+      setTimeout(() => flatRef.current?.scrollToIndex({ index: idx, animated: false }), 50);
+    }
+  }, [notes]);
+
   const renderItem = useCallback(
     ({ item }: { item: ListItem }) => {
       if (item.id === CREATE_ID) {
         return <CreateSlot width={width} onPress={handleCreate} />;
       }
+      const note = item as Note;
       return (
         <NoteCard
-          note={item as Note}
+          note={note}
           width={width}
           onUpdate={updateNote}
           onArchive={handleArchive}
           onDelete={handleDelete}
+          onReorder={() => openReorder(note.id)}
         />
       );
     },
-    [width, handleCreate, updateNote, handleArchive, handleDelete],
+    [width, handleCreate, updateNote, handleArchive, handleDelete, openReorder],
   );
+
+  const renderReorderItem = useCallback(
+    ({ item, drag, isActive }: RenderItemParams<Note>) => (
+      <ScaleDecorator>
+        <Pressable
+          onLongPress={drag}
+          delayLongPress={300}
+          disabled={isActive}
+          style={[styles.reorderRow, isActive && styles.reorderRowActive]}
+        >
+          <View style={[styles.reorderDot, { backgroundColor: noteColor(item.id) }]} />
+          <Text style={styles.reorderTitle} numberOfLines={1}>
+            {item.title.trim() || 'Untitled'}
+          </Text>
+          <Text style={styles.dragHandleText}>⠿</Text>
+        </Pressable>
+      </ScaleDecorator>
+    ),
+    [],
+  );
+
+  const onReorderDragEnd = useCallback(async ({ data }: { data: Note[] }) => {
+    setNotes(data);
+    await Promise.all(
+      data.map((note, index) =>
+        supabase.from('notes').update({ sort_order: index }).eq('id', note.id),
+      ),
+    );
+  }, []);
 
   if (loading) {
     return (
@@ -376,6 +434,27 @@ export default function NotesPage() {
           if (idx === notes.length) handleCreate();
         }}
       />
+
+      <Modal visible={reorderOpen} animationType="slide" transparent onRequestClose={closeReorder}>
+        <View style={styles.reorderBackdrop}>
+          <View style={styles.reorderSheet}>
+            <View style={styles.reorderHeader}>
+              <Text style={styles.reorderHeading}>Reorder Notes</Text>
+              <Pressable onPress={closeReorder} hitSlop={12}>
+                <Text style={styles.reorderDone}>Done</Text>
+              </Pressable>
+            </View>
+            <DraggableFlatList
+              data={notes}
+              keyExtractor={(item) => item.id}
+              renderItem={renderReorderItem}
+              onDragEnd={onReorderDragEnd}
+              activationDistance={5}
+              contentContainerStyle={styles.reorderList}
+            />
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -423,12 +502,29 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 20,
   },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
   titleInput: {
     fontSize: 22,
     fontWeight: '700',
     color: C.text,
     padding: 0,
-    marginBottom: 10,
+  },
+  titleInputFlex: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  dragHandle: {
+    paddingHorizontal: 6,
+    marginLeft: 8,
+  },
+  dragHandleText: {
+    fontSize: 22,
+    color: C.muted,
+    fontWeight: '700',
   },
   cardDivider: {
     height: 1,
@@ -456,6 +552,65 @@ const styles = StyleSheet.create({
   actionText: {
     fontSize: 14,
     fontWeight: '600',
+  },
+
+  // Reorder modal
+  reorderBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  reorderSheet: {
+    backgroundColor: '#FFFDF5',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '70%',
+    paddingBottom: 24,
+  },
+  reorderHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(44,26,14,0.08)',
+  },
+  reorderHeading: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: C.text,
+  },
+  reorderDone: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: C.accent,
+  },
+  reorderList: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+  },
+  reorderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    gap: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(44,26,14,0.08)',
+  },
+  reorderRowActive: {
+    opacity: 0.85,
+  },
+  reorderDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 4,
+  },
+  reorderTitle: {
+    flex: 1,
+    fontSize: 15,
+    color: C.text,
+    fontWeight: '500',
   },
 
   // Create slot

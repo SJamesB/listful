@@ -1,96 +1,128 @@
 const sharp = require('sharp');
 const path = require('path');
 
-const SIZE = 1024;
+const IMAGES = path.join(__dirname, '..', 'assets', 'images');
+const SOURCE = path.join(IMAGES, 'icon-source.png');
 
-// The "l" is drawn as a single thick stroke path — round linecaps automatically
-// give the bubbly top and flick tip without any extra shapes.
-//
-// Stem: vertical line, top at (420, 190), bottom merges into the flick curve.
-// Flick: quadratic bezier that sweeps right, dips slightly, then curves
-//        back UP dramatically — matching the reference bubble-letter style.
+// The source export is a 1024x1024 rounded-square tile (transparent corners).
+// This crop sits inside the rounded corners so the result is a flat,
+// full-bleed square — the OS applies its own icon mask on top.
+const CROP = { left: 288, top: 265, width: 448, height: 448 };
 
-const STROKE = 168;       // stroke width → controls how "fat" the letter is
-const SX  = 418;          // x centre of the stem
-const ST  = 195;          // y top of stem
-const SB  = 762;          // y bottom of stem (start of flick)
-const FCX = 610;          // flick control-point x (pulls the curve outward)
-const FCY = 840;          // flick control-point y (dips below baseline)
-const FEX = 672;          // flick end x
-const FEY = 590;          // flick end y  (tip is notably HIGHER than the stem bottom)
-
-const D = `M ${SX},${ST} L ${SX},${SB} Q ${FCX},${FCY} ${FEX},${FEY}`;
-
-function lLayer(strokeWidth, opacity, filter) {
-  const f = filter ? `filter="url(#${filter})"` : '';
-  return `<path d="${D}"
-    stroke="white" stroke-width="${strokeWidth}" stroke-linecap="round"
-    stroke-linejoin="round" fill="none"
-    opacity="${opacity}" ${f}/>`;
+function baseIcon(size) {
+  return sharp(SOURCE).extract(CROP).resize(size, size);
 }
 
-function iconSvg() {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1" gradientUnits="objectBoundingBox">
-      <stop offset="0%"   stop-color="#F0BFFF"/>
-      <stop offset="33%"  stop-color="#BFCFFF"/>
-      <stop offset="66%"  stop-color="#BFFFEC"/>
-      <stop offset="100%" stop-color="#F0BFFF"/>
-    </linearGradient>
-    <linearGradient id="warm" x1="1" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
-      <stop offset="0%"   stop-color="#FFD4B8" stop-opacity="0.55"/>
-      <stop offset="60%"  stop-color="#FFFBB8" stop-opacity="0.22"/>
-      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
-    </linearGradient>
-    <filter id="glow" x="-50%" y="-20%" width="200%" height="140%">
-      <feGaussianBlur stdDeviation="28" result="blur"/>
-      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
-    </filter>
-    <filter id="shadow" x="-30%" y="-10%" width="160%" height="130%">
-      <feDropShadow dx="0" dy="12" stdDeviation="18"
-        flood-color="#5020A0" flood-opacity="0.28"/>
-    </filter>
-  </defs>
-
-  <!-- Background -->
-  <rect width="${SIZE}" height="${SIZE}" fill="url(#bg)"/>
-  <rect width="${SIZE}" height="${SIZE}" fill="url(#warm)"/>
-
-  <!-- Soft glow halo -->
-  ${lLayer(STROKE + 80, 0.22, 'glow')}
-
-  <!-- The "l" -->
-  ${lLayer(STROKE, 0.97, 'shadow')}
-</svg>`;
+// Isolate the "!" + heart "L" mark by flood-filling the gradient background
+// (everything reachable from the canvas border that isn't a near-black
+// outline pixel). What's left — the outline plus the white fill it encloses
+// — is the glyph silhouette.
+async function glyphAlpha(size) {
+  const { data, info } = await baseIcon(size).raw().toBuffer({ resolveWithObject: true });
+  const { width, height, channels } = info;
+  const isDark = new Uint8Array(width * height);
+  for (let i = 0, p = 0; i < data.length; i += channels, p++) {
+    isDark[p] = Math.max(data[i], data[i + 1], data[i + 2]) < 70 ? 1 : 0;
+  }
+  const isBg = new Uint8Array(width * height);
+  const stack = [];
+  const visit = (x, y) => {
+    if (x < 0 || y < 0 || x >= width || y >= height) return;
+    const idx = y * width + x;
+    if (isBg[idx] || isDark[idx]) return;
+    isBg[idx] = 1;
+    stack.push(idx);
+  };
+  for (let x = 0; x < width; x++) { visit(x, 0); visit(x, height - 1); }
+  for (let y = 0; y < height; y++) { visit(0, y); visit(width - 1, y); }
+  while (stack.length) {
+    const idx = stack.pop();
+    const x = idx % width, y = (idx / width) | 0;
+    visit(x + 1, y); visit(x - 1, y); visit(x, y + 1); visit(x, y - 1);
+  }
+  return { data, info, isBg };
 }
 
-function foregroundSvg() {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}">
-  <defs>
-    <filter id="shadow" x="-30%" y="-10%" width="160%" height="130%">
-      <feDropShadow dx="0" dy="12" stdDeviation="18"
-        flood-color="#5020A0" flood-opacity="0.30"/>
-    </filter>
-  </defs>
-  ${lLayer(STROKE, 0.97, 'shadow')}
-</svg>`;
+// Bounding box of the connected glyph region containing the canvas centre
+// (avoids stray edge pixels from the flood fill).
+function glyphBBox({ info, isBg }) {
+  const { width, height } = info;
+  const isGlyph = (x, y) => !isBg[y * width + x];
+  const visited = new Uint8Array(width * height);
+  const stack = [[width >> 1, height >> 1]];
+  let minX = width, maxX = 0, minY = height, maxY = 0;
+  while (stack.length) {
+    const [x, y] = stack.pop();
+    if (x < 0 || y < 0 || x >= width || y >= height) continue;
+    const idx = y * width + x;
+    if (visited[idx] || !isGlyph(x, y)) continue;
+    visited[idx] = 1;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+    stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+  }
+  return { left: minX, top: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+}
+
+// Render the glyph (cropped to its bbox) at `targetWidth`, either as a flat
+// `color` silhouette or in its original black-outline/white-fill colours.
+async function glyphImage(size, targetWidth, color) {
+  const mask = await glyphAlpha(size);
+  const bbox = glyphBBox(mask);
+  const { data, info } = mask;
+  const out = Buffer.alloc(bbox.width * bbox.height * 4);
+  for (let y = 0; y < bbox.height; y++) {
+    for (let x = 0; x < bbox.width; x++) {
+      const sx = bbox.left + x, sy = bbox.top + y;
+      const si = (sy * info.width + sx) * info.channels;
+      const di = (y * bbox.width + x) * 4;
+      const opaque = !mask.isBg[sy * info.width + sx];
+      if (color) {
+        out[di] = color[0]; out[di + 1] = color[1]; out[di + 2] = color[2];
+      } else {
+        out[di] = data[si]; out[di + 1] = data[si + 1]; out[di + 2] = data[si + 2];
+      }
+      out[di + 3] = opaque ? 255 : 0;
+    }
+  }
+  const targetHeight = Math.round((targetWidth * bbox.height) / bbox.width);
+  return sharp(out, { raw: { width: bbox.width, height: bbox.height, channels: 4 } })
+    .resize(targetWidth, targetHeight);
 }
 
 async function run() {
-  const outDir = path.join(__dirname, '..', 'assets', 'images');
+  await baseIcon(1024).png().toFile(path.join(IMAGES, 'icon.png'));
+  console.log('icon.png');
 
-  await sharp(Buffer.from(iconSvg())).png()
-    .toFile(path.join(outDir, 'icon.png'));
-  console.log('✓ icon.png');
+  await baseIcon(1024).png().toFile(path.join(IMAGES, 'android-icon-foreground.png'));
+  console.log('android-icon-foreground.png');
 
-  await sharp(Buffer.from(foregroundSvg())).png()
-    .toFile(path.join(outDir, 'android-icon-foreground.png'));
-  console.log('✓ android-icon-foreground.png');
+  await baseIcon(512).png().toFile(path.join(IMAGES, 'android-icon-background.png'));
+  console.log('android-icon-background.png');
 
-  await sharp({ create: { width: SIZE, height: SIZE, channels: 3, background: '#D4A8FF' } })
-    .png().toFile(path.join(outDir, 'android-icon-background.png'));
-  console.log('✓ android-icon-background.png');
+  // Monochrome (Android 13+ themed icon): white silhouette on transparent,
+  // centred in the safe zone of a 432x432 canvas.
+  const monoGlyph = await (await glyphImage(1024, 200, [255, 255, 255])).png().toBuffer();
+  const monoMeta = await sharp(monoGlyph).metadata();
+  await sharp({ create: { width: 432, height: 432, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .composite([{ input: monoGlyph, left: Math.round((432 - monoMeta.width) / 2), top: Math.round((432 - monoMeta.height) / 2) }])
+    .png()
+    .toFile(path.join(IMAGES, 'android-icon-monochrome.png'));
+  console.log('android-icon-monochrome.png');
+
+  // Splash logo: glyph in its original colours, transparent background.
+  await (await glyphImage(1024, 228)).png().toFile(path.join(IMAGES, 'splash-icon.png'));
+  console.log('splash-icon.png');
+
+  // Favicon: the full rounded-square tile (with transparent corners) at
+  // browser-tab size.
+  await sharp(SOURCE).resize(48, 48).png().toFile(path.join(IMAGES, 'favicon.png'));
+  console.log('favicon.png');
 }
 
-run().catch(console.error);
+run().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
