@@ -13,6 +13,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { supabase } from '@/lib/supabase';
 
@@ -436,7 +437,7 @@ export default function NotesPage() {
       />
 
       <Modal visible={reorderOpen} animationType="slide" transparent onRequestClose={closeReorder}>
-        <View style={styles.reorderBackdrop}>
+        <GestureHandlerRootView style={styles.reorderBackdrop}>
           <View style={styles.reorderSheet}>
             <View style={styles.reorderHeader}>
               <Text style={styles.reorderHeading}>Reorder Notes</Text>
@@ -453,7 +454,7 @@ export default function NotesPage() {
               contentContainerStyle={styles.reorderList}
             />
           </View>
-        </View>
+        </GestureHandlerRootView>
       </Modal>
     </KeyboardAvoidingView>
   );
