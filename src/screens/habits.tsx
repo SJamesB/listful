@@ -8,6 +8,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GOOGLE_REFRESH_TOKEN } from '@/lib/googleConfig';
 import {
@@ -169,6 +170,7 @@ interface HistoryModalProps {
 }
 
 function HistoryModal({ visible, onClose, habits }: HistoryModalProps) {
+  const insets = useSafeAreaInsets();
   const [logs, setLogs] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -226,7 +228,7 @@ function HistoryModal({ visible, onClose, habits }: HistoryModalProps) {
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={hist.backdrop}>
-        <View style={hist.sheet}>
+        <View style={[hist.sheet, { paddingBottom: insets.bottom + 24 }]}>
           <View style={hist.header}>
             <Text style={hist.heading}>History</Text>
             <Pressable onPress={onClose} hitSlop={12}>
@@ -428,7 +430,6 @@ const hist = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     maxHeight: '80%',
-    paddingBottom: 24,
   },
   header: {
     flexDirection: 'row',
