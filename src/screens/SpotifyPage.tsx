@@ -12,6 +12,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 
+import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
 import { supabase } from '@/lib/supabase';
 import {
   clearAuth,
@@ -44,9 +45,11 @@ interface DBPlaylist {
 
 interface Props {
   onPinsChanged?: () => void;
+  onEdgesChange?: EdgesChangeHandler;
 }
 
-export default function SpotifyPage({ onPinsChanged }: Props) {
+export default function SpotifyPage({ onPinsChanged, onEdgesChange }: Props) {
+  const edgeScroll = useSectionEdgeScroll(onEdgesChange);
   const { width } = useWindowDimensions();
   const cardWidth = (width - PADDING * 2 - GAP) / COLS;
 
@@ -314,6 +317,7 @@ export default function SpotifyPage({ onPinsChanged }: Props) {
             contentContainerStyle={[styles.grid, { padding: PADDING }]}
             columnWrapperStyle={{ gap: GAP }}
             showsVerticalScrollIndicator={false}
+            {...edgeScroll}
           />
         </>
       )}

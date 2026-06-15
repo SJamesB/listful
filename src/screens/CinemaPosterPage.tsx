@@ -1,11 +1,9 @@
 import { Image } from 'expo-image';
-import * as SecureStore from 'expo-secure-store';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
   Modal,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -14,178 +12,316 @@ import {
   useWindowDimensions,
 } from 'react-native';
 
+import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
 import { supabase } from '@/lib/supabase';
-
-const store = {
-  getItemAsync: (key: string): Promise<string | null> =>
-    Platform.OS === 'web'
-      ? Promise.resolve(localStorage.getItem(key))
-      : SecureStore.getItemAsync(key),
-  setItemAsync: (key: string, value: string): Promise<void> =>
-    Platform.OS === 'web'
-      ? Promise.resolve(void localStorage.setItem(key, value))
-      : SecureStore.setItemAsync(key, value),
-};
 
 const C = {
   text: '#1A1626',
   muted: 'rgba(26,22,38,0.45)',
   accent: '#7C3AED',
+  danger: '#DC2626',
 } as const;
 
-const IMDB_USER_ID_KEY = 'imdb_user_id';
+const POSTER_BASE = 'https://image.tmdb.org/t/p/w342';
 const COLS = 3;
 const PADDING = 16;
 const GAP = 6;
+const MODAL_PADDING = 28;
+const SEARCH_DEBOUNCE_MS = 400;
 
-interface IMDBItem {
+interface CinemaItem {
   id: string;
-  imdb_id: string;
+  tmdb_id: number;
+  media_type: 'movie' | 'tv';
   title: string;
-  poster_url: string | null;
-  media_type: 'Movie' | 'TV';
+  year: string | null;
+  poster_path: string | null;
 }
 
-interface Props {
+interface SearchResult {
+  tmdb_id: number;
+  media_type: 'movie' | 'tv';
   title: string;
-  source: 'watchlist' | 'ratings' | 'list';
-  mediaType?: 'Movie' | 'TV';
-  listId?: string;
+  year: string | null;
+  poster_path: string | null;
 }
 
-export default function CinemaPosterPage({ title, source, mediaType, listId }: Props) {
-  const { width } = useWindowDimensions();
+export type CinemaPosterPageProps =
+  | { title: string; mode: 'watch'; status: 'to_watch' | 'watched' }
+  | { title: string; mode: 'nine_club' };
+
+type Props = CinemaPosterPageProps & { onEdgesChange?: EdgesChangeHandler };
+
+type NineClubCategory = 'film' | 'tv' | 'animation';
+
+const NINE_CLUB_CATEGORIES: { key: NineClubCategory; label: string }[] = [
+  { key: 'film', label: 'Film' },
+  { key: 'tv', label: 'TV' },
+  { key: 'animation', label: 'Animation' },
+];
+
+const WATCHLIST_FILTERS: { key: 'movie' | 'tv'; label: string }[] = [
+  { key: 'movie', label: 'Film' },
+  { key: 'tv', label: 'TV' },
+];
+
+const posterUri = (path: string | null) => (path ? `${POSTER_BASE}${path}` : null);
+const resultKey = (tmdbId: number, mediaType: string) => `${tmdbId}-${mediaType}`;
+
+function FilterRow<T extends string>({ options, active, onSelect }: {
+  options: { key: T; label: string }[];
+  active: T;
+  onSelect: (key: T) => void;
+}) {
+  return (
+    <View style={styles.filterRow}>
+      {options.map((o) => (
+        <Pressable
+          key={o.key}
+          onPress={() => onSelect(o.key)}
+          style={[styles.filterChip, active === o.key && styles.filterChipActive]}
+        >
+          <Text style={[styles.filterChipText, active === o.key && styles.filterChipTextActive]}>
+            {o.label}
+          </Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+export default function CinemaPosterPage(props: Props) {
+  const { title, mode, onEdgesChange } = props;
+  const edgeScroll = useSectionEdgeScroll(onEdgesChange);
+  const status = mode === 'watch' ? props.status : undefined;
+  const [category, setCategory] = useState<NineClubCategory>('film');
+  const [mediaTypeFilter, setMediaTypeFilter] = useState<'movie' | 'tv'>('movie');
+  const searchMediaType = mode === 'watch' && status === 'to_watch' ? mediaTypeFilter : undefined;
+  const modalCategoryLabel =
+    mode === 'nine_club'
+      ? NINE_CLUB_CATEGORIES.find((c) => c.key === category)?.label
+      : status === 'to_watch'
+        ? WATCHLIST_FILTERS.find((f) => f.key === mediaTypeFilter)?.label
+        : undefined;
+
+  const { width, height } = useWindowDimensions();
   const posterWidth = (width - PADDING * 2 - GAP * (COLS - 1)) / COLS;
   const posterHeight = posterWidth * 1.5;
+  const resultWidth = (width - MODAL_PADDING * 2 - GAP * (COLS - 1)) / COLS;
+  const resultHeight = resultWidth * 1.5;
 
-  const [items, setItems] = useState<IMDBItem[]>([]);
+  const [items, setItems] = useState<CinemaItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
-  const [syncError, setSyncError] = useState<string | null>(null);
-  const [userId, setUserId] = useState('');
-  const [setupOpen, setSetupOpen] = useState(false);
-  const [userIdDraft, setUserIdDraft] = useState('');
+
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const [addedKeys, setAddedKeys] = useState<Set<string>>(new Set());
+
+  const [actionItem, setActionItem] = useState<CinemaItem | null>(null);
 
   const load = useCallback(async () => {
     let q = supabase
-      .from('imdb_items')
-      .select('id, imdb_id, title, poster_url, media_type')
-      .eq('source', source);
-    if (mediaType) q = (q as any).eq('media_type', mediaType);
-    if (listId) q = (q as any).eq('list_id', listId);
-    const { data } = await (q as any).order('synced_at', { ascending: false });
-    if (data) setItems(data as IMDBItem[]);
+      .from('cinema_items')
+      .select('id, tmdb_id, media_type, title, year, poster_path');
+    let orderCol: string;
+    if (mode === 'nine_club') {
+      q = q.eq('nine_club_category', category);
+      orderCol = 'nine_club_added_at';
+    } else {
+      q = q.eq('status', status!);
+      if (status === 'to_watch') q = q.eq('media_type', mediaTypeFilter);
+      orderCol = status === 'watched' ? 'watched_at' : 'added_at';
+    }
+    const { data } = await q.order(orderCol, { ascending: false });
+    if (data) setItems(data as CinemaItem[]);
     setLoading(false);
-  }, [source, mediaType, listId]);
+  }, [mode, status, mediaTypeFilter, category]);
 
   useEffect(() => {
-    const init = async () => {
-      const saved = await store.getItemAsync(IMDB_USER_ID_KEY);
-      if (saved) setUserId(saved);
-      await load();
-    };
-    init();
+    load();
   }, [load]);
 
-  const openSetup = async () => {
-    const saved = await store.getItemAsync(IMDB_USER_ID_KEY);
-    setUserIdDraft(saved ?? '');
-    setSetupOpen(true);
-  };
+  const existingKeys = useMemo(
+    () => new Set(items.map((i) => resultKey(i.tmdb_id, i.media_type))),
+    [items],
+  );
 
-  const saveSetup = async () => {
-    const trimmed = userIdDraft.trim();
-    if (!trimmed) return;
-    await store.setItemAsync(IMDB_USER_ID_KEY, trimmed);
-    setUserId(trimmed);
-    setSetupOpen(false);
-  };
-
-  const sync = async () => {
-    if (!userId) { openSetup(); return; }
-    setSyncing(true);
-    setSyncError(null);
-    try {
-      const body = source === 'list' && listId
-        ? { userId, source: 'list', listId }
-        : { userId, source };
-
-      const { data, error } = await supabase.functions.invoke('imdb-fetch', { body });
-      if (error) throw new Error(error.message);
-      if (data?.error) throw new Error(data.error);
-
-      const rows = (data?.items ?? []).map((item: any) => ({
-        ...item,
-        source,
-        list_id: listId ?? null,
-        list_name: data.listName ?? null,
-        synced_at: new Date().toISOString(),
-      }));
-
-      if (rows.length > 0) {
-        await supabase.from('imdb_items').upsert(rows, { onConflict: 'imdb_id,source' });
+  // Debounced TMDB search
+  useEffect(() => {
+    if (!searchOpen) return;
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setResults([]);
+      setSearchError(null);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const timeout = setTimeout(async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke('tmdb-search', {
+          body: { query: trimmed, mediaType: searchMediaType },
+        });
+        if (error) throw new Error(error.message);
+        if (data?.error) throw new Error(data.error);
+        setResults((data?.results ?? []) as SearchResult[]);
+        setSearchError(null);
+      } catch (err) {
+        setSearchError(err instanceof Error ? err.message : String(err));
+        setResults([]);
+      } finally {
+        setSearching(false);
       }
-      await load();
-    } catch (err) {
-      setSyncError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSyncing(false);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timeout);
+  }, [query, searchOpen, searchMediaType]);
+
+  const openSearch = () => {
+    setQuery('');
+    setResults([]);
+    setSearchError(null);
+    setAddedKeys(new Set());
+    setSearchOpen(true);
+  };
+
+  const addResult = async (result: SearchResult) => {
+    const now = new Date().toISOString();
+    const payload: Record<string, unknown> = {
+      tmdb_id: result.tmdb_id,
+      media_type: result.media_type,
+      title: result.title,
+      year: result.year,
+      poster_path: result.poster_path,
+    };
+    if (mode === 'nine_club') {
+      payload.nine_club_category = category;
+      payload.nine_club_added_at = now;
+    } else {
+      payload.status = status;
+      payload.added_at = now;
+      payload.watched_at = status === 'watched' ? now : null;
+    }
+    const { error } = await supabase.from('cinema_items').upsert(payload, { onConflict: 'tmdb_id,media_type' });
+    if (!error) {
+      setAddedKeys((prev) => new Set(prev).add(resultKey(result.tmdb_id, result.media_type)));
+      load();
     }
   };
 
-  const renderItem = ({ item }: { item: IMDBItem }) => (
-    <View style={[styles.posterWrap, { width: posterWidth }]}>
-      {item.poster_url ? (
+  const markWatched = async (item: CinemaItem) => {
+    await supabase
+      .from('cinema_items')
+      .update({ status: 'watched', watched_at: new Date().toISOString() })
+      .eq('id', item.id);
+    setActionItem(null);
+    load();
+  };
+
+  const moveToWatchlist = async (item: CinemaItem) => {
+    await supabase
+      .from('cinema_items')
+      .update({ status: 'to_watch', watched_at: null })
+      .eq('id', item.id);
+    setActionItem(null);
+    load();
+  };
+
+  const removeItem = async (item: CinemaItem) => {
+    await supabase.from('cinema_items').delete().eq('id', item.id);
+    setActionItem(null);
+    load();
+  };
+
+  const removeFromNineClub = async (item: CinemaItem) => {
+    await supabase
+      .from('cinema_items')
+      .update({ nine_club_category: null, nine_club_added_at: null })
+      .eq('id', item.id);
+    setActionItem(null);
+    load();
+  };
+
+  const renderItem = ({ item }: { item: CinemaItem }) => (
+    <Pressable
+      style={[styles.posterWrap, { width: posterWidth }]}
+      onLongPress={() => setActionItem(item)}
+      delayLongPress={350}
+    >
+      {item.poster_path ? (
         <Image
-          source={{ uri: item.poster_url }}
+          source={{ uri: posterUri(item.poster_path)! }}
           style={[styles.poster, { width: posterWidth, height: posterHeight }]}
           contentFit="cover"
         />
       ) : (
         <View style={[styles.poster, styles.posterFallback, { width: posterWidth, height: posterHeight }]}>
-          <Text style={styles.fallbackEmoji}>{mediaType === 'TV' ? '📺' : '🎬'}</Text>
+          <Text style={styles.fallbackEmoji}>{item.media_type === 'tv' ? '📺' : '🎬'}</Text>
         </View>
       )}
-    </View>
+    </Pressable>
   );
+
+  const renderResult = ({ item }: { item: SearchResult }) => {
+    const added = existingKeys.has(resultKey(item.tmdb_id, item.media_type)) ||
+      addedKeys.has(resultKey(item.tmdb_id, item.media_type));
+    return (
+      <Pressable style={[styles.resultWrap, { width: resultWidth }]} onPress={() => addResult(item)}>
+        <View>
+          {item.poster_path ? (
+            <Image
+              source={{ uri: posterUri(item.poster_path)! }}
+              style={[styles.resultPoster, { width: resultWidth, height: resultHeight }]}
+              contentFit="cover"
+            />
+          ) : (
+            <View style={[styles.resultPoster, styles.posterFallback, { width: resultWidth, height: resultHeight }]}>
+              <Text style={styles.fallbackEmoji}>{item.media_type === 'tv' ? '📺' : '🎬'}</Text>
+            </View>
+          )}
+          {added && (
+            <View style={styles.addedBadge}>
+              <Text style={styles.addedBadgeText}>✓</Text>
+            </View>
+          )}
+        </View>
+        <Text style={styles.resultTitle} numberOfLines={2}>{item.title}</Text>
+        {item.year ? <Text style={styles.resultYear}>{item.year}</Text> : null}
+      </Pressable>
+    );
+  };
 
   return (
     <View style={styles.root}>
       <View style={styles.header}>
         <Text style={styles.title}>{title}</Text>
-        <View style={styles.headerActions}>
-          <Pressable onPress={openSetup} hitSlop={10}>
-            <Text style={styles.iconBtn}>⚙️</Text>
-          </Pressable>
-          <Pressable
-            onPress={sync}
-            disabled={syncing}
-            style={({ pressed }) => [styles.syncBtn, { opacity: pressed || syncing ? 0.6 : 1 }]}
-          >
-            {syncing
-              ? <ActivityIndicator size="small" color="#fff" />
-              : <Text style={styles.syncBtnText}>Sync</Text>
-            }
-          </Pressable>
-        </View>
+        <Pressable
+          onPress={openSearch}
+          style={({ pressed }) => [styles.addBtn, { opacity: pressed ? 0.6 : 1 }]}
+        >
+          <Text style={styles.addBtnText}>+ Add</Text>
+        </Pressable>
       </View>
 
-      {syncError ? (
-        <Text style={styles.errorText} numberOfLines={3}>{syncError}</Text>
-      ) : null}
+      {mode === 'nine_club' && (
+        <FilterRow options={NINE_CLUB_CATEGORIES} active={category} onSelect={setCategory} />
+      )}
+      {mode === 'watch' && status === 'to_watch' && (
+        <FilterRow options={WATCHLIST_FILTERS} active={mediaTypeFilter} onSelect={setMediaTypeFilter} />
+      )}
 
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={C.accent} /></View>
       ) : items.length === 0 ? (
         <View style={styles.center}>
-          <Text style={styles.emptyText}>
-            {userId ? 'No items — tap Sync to fetch' : 'Connect your IMDB account to get started'}
-          </Text>
+          <Text style={styles.emptyText}>Nothing here yet</Text>
           <Pressable
-            onPress={userId ? sync : openSetup}
+            onPress={openSearch}
             style={({ pressed }) => [styles.emptyBtn, { opacity: pressed ? 0.6 : 1 }]}
           >
-            <Text style={styles.emptyBtnText}>{userId ? 'Sync' : 'Connect IMDB'}</Text>
+            <Text style={styles.emptyBtnText}>Search TMDB</Text>
           </Pressable>
         </View>
       ) : (
@@ -197,50 +333,109 @@ export default function CinemaPosterPage({ title, source, mediaType, listId }: P
           contentContainerStyle={[styles.grid, { padding: PADDING }]}
           columnWrapperStyle={{ gap: GAP }}
           showsVerticalScrollIndicator={false}
+          {...edgeScroll}
         />
       )}
 
       <Modal
-        visible={setupOpen}
+        visible={searchOpen}
         animationType="slide"
         transparent
         presentationStyle="overFullScreen"
-        onRequestClose={() => setSetupOpen(false)}
+        onRequestClose={() => setSearchOpen(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>IMDB Account</Text>
-            <Text style={styles.modalHint}>
-              Find your user ID in your IMDB profile URL:{'\n'}
-              imdb.com/user/<Text style={{ fontWeight: '700' }}>ur12345678</Text>/
-            </Text>
-            <Text style={styles.modalHint}>
-              Your lists must be set to <Text style={{ fontWeight: '700' }}>Public</Text> in IMDB Privacy Settings.
-            </Text>
+          <View style={[styles.modalCard, { maxHeight: height * 0.85 }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                Add to {title}{modalCategoryLabel ? `: ${modalCategoryLabel}` : ''}
+              </Text>
+              <Pressable onPress={() => setSearchOpen(false)} hitSlop={8}>
+                <Text style={styles.doneText}>Done</Text>
+              </Pressable>
+            </View>
             <TextInput
               style={styles.modalInput}
-              value={userIdDraft}
-              onChangeText={setUserIdDraft}
-              placeholder="ur12345678"
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search movies & TV shows"
               placeholderTextColor={C.muted}
               autoCapitalize="none"
               autoCorrect={false}
-              returnKeyType="done"
-              onSubmitEditing={saveSetup}
+              autoFocus
+              returnKeyType="search"
             />
-            <View style={styles.modalActions}>
-              <Pressable onPress={() => setSetupOpen(false)}>
-                <Text style={styles.cancelText}>cancel</Text>
-              </Pressable>
-              <Pressable
-                onPress={saveSetup}
-                style={({ pressed }) => [styles.saveBtn, { opacity: pressed ? 0.6 : 1 }]}
-              >
-                <Text style={styles.saveBtnText}>Save</Text>
-              </Pressable>
-            </View>
+            {searchError ? <Text style={styles.errorText}>{searchError}</Text> : null}
+            {searching ? (
+              <ActivityIndicator color={C.accent} style={styles.searchSpinner} />
+            ) : (
+              <FlatList
+                style={styles.resultsList}
+                data={results}
+                keyExtractor={(item) => resultKey(item.tmdb_id, item.media_type)}
+                renderItem={renderResult}
+                numColumns={COLS}
+                columnWrapperStyle={{ gap: GAP }}
+                contentContainerStyle={styles.resultsGrid}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+                ListEmptyComponent={
+                  query.trim() ? <Text style={styles.emptyText}>No results</Text> : null
+                }
+              />
+            )}
           </View>
         </View>
+      </Modal>
+
+      <Modal
+        visible={!!actionItem}
+        animationType="fade"
+        transparent
+        presentationStyle="overFullScreen"
+        onRequestClose={() => setActionItem(null)}
+      >
+        <Pressable style={styles.actionOverlay} onPress={() => setActionItem(null)}>
+          <Pressable style={styles.actionCard} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.actionTitle} numberOfLines={2}>{actionItem?.title}</Text>
+            {mode === 'nine_club' ? (
+              <Pressable
+                style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
+                onPress={() => actionItem && removeFromNineClub(actionItem)}
+              >
+                <Text style={styles.actionBtnText}>Remove from 9-Club</Text>
+              </Pressable>
+            ) : status === 'to_watch' ? (
+              <Pressable
+                style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
+                onPress={() => actionItem && markWatched(actionItem)}
+              >
+                <Text style={styles.actionBtnText}>Mark as watched</Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
+                onPress={() => actionItem && moveToWatchlist(actionItem)}
+              >
+                <Text style={styles.actionBtnText}>Move to Watchlist</Text>
+              </Pressable>
+            )}
+            {mode === 'watch' && (
+              <Pressable
+                style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
+                onPress={() => actionItem && removeItem(actionItem)}
+              >
+                <Text style={[styles.actionBtnText, styles.actionBtnDanger]}>Remove</Text>
+              </Pressable>
+            )}
+            <Pressable
+              style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
+              onPress={() => setActionItem(null)}
+            >
+              <Text style={styles.actionBtnText}>Cancel</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
       </Modal>
     </View>
   );
@@ -262,13 +457,7 @@ const styles = StyleSheet.create({
     color: C.text,
     letterSpacing: -0.3,
   },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  iconBtn: { fontSize: 18 },
-  syncBtn: {
+  addBtn: {
     backgroundColor: C.accent,
     paddingHorizontal: 14,
     paddingVertical: 6,
@@ -278,11 +467,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  syncBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  addBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  filterRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: PADDING,
+    marginBottom: 12,
+  },
+  filterChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: 'rgba(26,22,38,0.06)',
+  },
+  filterChipActive: {
+    backgroundColor: C.accent,
+  },
+  filterChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: C.muted,
+  },
+  filterChipTextActive: {
+    color: '#fff',
+  },
   errorText: {
     fontSize: 12,
-    color: '#DC2626',
-    paddingHorizontal: PADDING,
+    color: C.danger,
     marginBottom: 8,
   },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, paddingHorizontal: 40 },
@@ -299,7 +510,7 @@ const styles = StyleSheet.create({
   poster: { borderRadius: 6, backgroundColor: 'rgba(26,22,38,0.08)' },
   posterFallback: { alignItems: 'center', justifyContent: 'center' },
   fallbackEmoji: { fontSize: 24 },
-  // Modal
+  // Search modal
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.4)',
@@ -309,33 +520,86 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    padding: 28,
+    padding: MODAL_PADDING,
     gap: 14,
   },
-  modalTitle: { fontSize: 18, fontWeight: '700', color: C.text, marginBottom: 2 },
-  modalHint: { fontSize: 13, color: C.muted, lineHeight: 19 },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  modalTitle: { fontSize: 18, fontWeight: '700', color: C.text },
+  doneText: { fontSize: 14, color: C.accent, fontWeight: '600' },
   modalInput: {
     fontSize: 16,
     color: C.text,
     borderBottomWidth: 1.5,
     borderBottomColor: C.accent,
     paddingVertical: 6,
-    marginTop: 4,
     outlineStyle: 'none',
   } as any,
-  modalActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    gap: 20,
-    marginTop: 8,
+  searchSpinner: { marginTop: 24, marginBottom: 24 },
+  resultsList: { flexShrink: 1 },
+  resultsGrid: { paddingTop: 8, paddingBottom: 12 },
+  resultWrap: { marginBottom: 14 },
+  resultPoster: { borderRadius: 6, backgroundColor: 'rgba(26,22,38,0.08)' },
+  resultTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: C.text,
+    marginTop: 6,
+    lineHeight: 15,
   },
-  cancelText: { fontSize: 14, color: C.muted },
-  saveBtn: {
+  resultYear: { fontSize: 11, color: C.muted, marginTop: 2 },
+  addedBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     backgroundColor: C.accent,
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  saveBtnText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  addedBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  // Action modal
+  actionOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 32,
+  },
+  actionCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    width: '100%',
+    maxWidth: 320,
+    gap: 4,
+  },
+  actionTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: C.text,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  actionBtn: {
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  actionBtnPressed: {
+    backgroundColor: 'rgba(26,22,38,0.06)',
+  },
+  actionBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: C.text,
+  },
+  actionBtnDanger: {
+    color: C.danger,
+  },
 });

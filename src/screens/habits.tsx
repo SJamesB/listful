@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
 import { GOOGLE_REFRESH_TOKEN } from '@/lib/googleConfig';
 import {
   type CalEvent,
@@ -289,7 +290,8 @@ function HistoryModal({ visible, onClose, habits }: HistoryModalProps) {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-export default function HabitsPage() {
+export default function HabitsPage({ onEdgesChange }: { onEdgesChange?: EdgesChangeHandler }) {
+  const edgeScroll = useSectionEdgeScroll(onEdgesChange);
   const [habits, setHabits] = useState<HabitRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -346,7 +348,7 @@ export default function HabitsPage() {
           <Pressable onPress={load}><Text style={styles.retryText}>retry</Text></Pressable>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false} {...edgeScroll}>
           <Text style={styles.date}>{DATE_LABEL}</Text>
           <View style={styles.grid}>
             {habits.map((habit) => (

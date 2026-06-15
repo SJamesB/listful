@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 
+import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
 import { type CategoryConfig } from '@/lib/logCategories';
 import { supabase } from '@/lib/supabase';
 
@@ -31,6 +32,7 @@ interface LogEntry {
 
 interface Props {
   config: CategoryConfig;
+  onEdgesChange?: EdgesChangeHandler;
 }
 
 function EntryForm({
@@ -117,7 +119,8 @@ function EntryForm({
   );
 }
 
-export function LogPage({ config }: Props) {
+export function LogPage({ config, onEdgesChange }: Props) {
+  const edgeScroll = useSectionEdgeScroll(onEdgesChange);
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -227,7 +230,7 @@ export function LogPage({ config }: Props) {
         <View style={styles.center}><ActivityIndicator color={config.accent} /></View>
       ) : (
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled">
+          keyboardShouldPersistTaps="handled" {...edgeScroll}>
           <View style={styles.content}>
 
             <View style={styles.header}>

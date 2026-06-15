@@ -2,61 +2,46 @@ import { useEffect, useRef, useState } from 'react';
 import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import type { Section } from '@/app';
+
 const DRAWER_WIDTH = 280;
 
-interface MenuItem {
-  index: number;
+export interface MenuItem {
+  localIndex: number;
   label: string;
 }
 
 const ORGANISE: MenuItem[] = [
-  { index: 0, label: '🦆 Today' },
-  { index: 1, label: '🐝 To Do' },
-  { index: 2, label: '🦚 La Dolce Vita' },
+  { localIndex: 0, label: '🦆 Today' },
+  { localIndex: 1, label: '🐝 To Do' },
+  { localIndex: 2, label: '🦚 La Dolce Vita' },
 ];
 
 interface Props {
   visible: boolean;
-  currentPage: number;
-  onSelectPage: (index: number) => void;
+  currentSection: Section;
+  currentLocalIndex: number;
+  onSelectPage: (section: Section, localIndex: number) => void;
   onClose: () => void;
   vaultPages: MenuItem[];
-  notesPageIndex: number;
   cinemaPages: MenuItem[];
   spotifyPages: MenuItem[];
 }
 
-type SectionKey = 'organise' | 'vault' | 'notes' | 'cinema' | 'spotify';
-
-function activeSection(
-  currentPage: number,
-  notesPageIndex: number,
-  cinemaPages: MenuItem[],
-  spotifyPages: MenuItem[],
-): SectionKey {
-  if (currentPage < 3) return 'organise';
-  if (currentPage < notesPageIndex) return 'vault';
-  if (cinemaPages.some((p) => p.index === currentPage)) return 'cinema';
-  if (spotifyPages.some((p) => p.index === currentPage)) return 'spotify';
-  return 'notes';
-}
-
 export function SideDrawer({
   visible,
-  currentPage,
+  currentSection,
+  currentLocalIndex,
   onSelectPage,
   onClose,
   vaultPages,
-  notesPageIndex,
   cinemaPages,
   spotifyPages,
 }: Props) {
   const insets = useSafeAreaInsets();
   const translateX = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
-  const [expanded, setExpanded] = useState<Set<SectionKey>>(
-    () => new Set([activeSection(currentPage, notesPageIndex, cinemaPages, spotifyPages)]),
-  );
+  const [expanded, setExpanded] = useState<Set<Section>>(() => new Set([currentSection]));
 
   useEffect(() => {
     Animated.parallel([
@@ -77,11 +62,11 @@ export function SideDrawer({
   // Auto-expand only the active section each time the drawer opens
   useEffect(() => {
     if (visible) {
-      setExpanded(new Set([activeSection(currentPage, notesPageIndex, cinemaPages, spotifyPages)]));
+      setExpanded(new Set([currentSection]));
     }
   }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const toggle = (key: SectionKey) => {
+  const toggle = (key: Section) => {
     setExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
@@ -89,6 +74,9 @@ export function SideDrawer({
       return next;
     });
   };
+
+  const isActive = (section: Section, item: MenuItem) =>
+    currentSection === section && currentLocalIndex === item.localIndex;
 
   return (
     <View
@@ -112,11 +100,11 @@ export function SideDrawer({
           </Pressable>
           {expanded.has('organise') && ORGANISE.map((item) => (
             <Pressable
-              key={item.index}
-              style={[styles.item, currentPage === item.index && styles.itemActive]}
-              onPress={() => onSelectPage(item.index)}
+              key={item.localIndex}
+              style={[styles.item, isActive('organise', item) && styles.itemActive]}
+              onPress={() => onSelectPage('organise', item.localIndex)}
             >
-              <Text style={[styles.itemText, currentPage === item.index && styles.itemTextActive]}>
+              <Text style={[styles.itemText, isActive('organise', item) && styles.itemTextActive]}>
                 {item.label}
               </Text>
             </Pressable>
@@ -131,10 +119,10 @@ export function SideDrawer({
           </Pressable>
           {expanded.has('notes') && (
             <Pressable
-              style={[styles.item, currentPage === notesPageIndex && styles.itemActive]}
-              onPress={() => onSelectPage(notesPageIndex)}
+              style={[styles.item, currentSection === 'notes' && styles.itemActive]}
+              onPress={() => onSelectPage('notes', 0)}
             >
-              <Text style={[styles.itemText, currentPage === notesPageIndex && styles.itemTextActive]}>
+              <Text style={[styles.itemText, currentSection === 'notes' && styles.itemTextActive]}>
                 📜 Notes
               </Text>
             </Pressable>
@@ -149,11 +137,11 @@ export function SideDrawer({
           </Pressable>
           {expanded.has('vault') && vaultPages.map((item) => (
             <Pressable
-              key={item.index}
-              style={[styles.item, currentPage === item.index && styles.itemActive]}
-              onPress={() => onSelectPage(item.index)}
+              key={item.localIndex}
+              style={[styles.item, isActive('vault', item) && styles.itemActive]}
+              onPress={() => onSelectPage('vault', item.localIndex)}
             >
-              <Text style={[styles.itemText, currentPage === item.index && styles.itemTextActive]}>
+              <Text style={[styles.itemText, isActive('vault', item) && styles.itemTextActive]}>
                 {item.label}
               </Text>
             </Pressable>
@@ -168,11 +156,11 @@ export function SideDrawer({
           </Pressable>
           {expanded.has('cinema') && cinemaPages.map((item) => (
             <Pressable
-              key={item.index}
-              style={[styles.item, currentPage === item.index && styles.itemActive]}
-              onPress={() => onSelectPage(item.index)}
+              key={item.localIndex}
+              style={[styles.item, isActive('cinema', item) && styles.itemActive]}
+              onPress={() => onSelectPage('cinema', item.localIndex)}
             >
-              <Text style={[styles.itemText, currentPage === item.index && styles.itemTextActive]}>
+              <Text style={[styles.itemText, isActive('cinema', item) && styles.itemTextActive]}>
                 {item.label}
               </Text>
             </Pressable>
@@ -187,11 +175,11 @@ export function SideDrawer({
           </Pressable>
           {expanded.has('spotify') && spotifyPages.map((item) => (
             <Pressable
-              key={item.index}
-              style={[styles.item, currentPage === item.index && styles.itemActive]}
-              onPress={() => onSelectPage(item.index)}
+              key={item.localIndex}
+              style={[styles.item, isActive('spotify', item) && styles.itemActive]}
+              onPress={() => onSelectPage('spotify', item.localIndex)}
             >
-              <Text style={[styles.itemText, currentPage === item.index && styles.itemTextActive]}>
+              <Text style={[styles.itemText, isActive('spotify', item) && styles.itemTextActive]}>
                 {item.label}
               </Text>
             </Pressable>
