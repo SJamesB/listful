@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 
+import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
 import { supabase } from '@/lib/supabase';
 
 const C = {
@@ -32,6 +33,7 @@ interface DBTrack {
 interface Props {
   title: string;
   spotifyId: string;
+  onEdgesChange?: EdgesChangeHandler;
 }
 
 function formatDuration(ms: number): string {
@@ -40,7 +42,8 @@ function formatDuration(ms: number): string {
   return `${m}:${(s % 60).toString().padStart(2, '0')}`;
 }
 
-export default function SpotifyPlaylistPage({ title, spotifyId }: Props) {
+export default function SpotifyPlaylistPage({ title, spotifyId, onEdgesChange }: Props) {
+  const edgeScroll = useSectionEdgeScroll(onEdgesChange);
   const [tracks, setTracks] = useState<DBTrack[]>([]);
   const [loading, setLoading] = useState(true);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
@@ -132,6 +135,7 @@ export default function SpotifyPlaylistPage({ title, spotifyId }: Props) {
           renderItem={renderTrack}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
+          {...edgeScroll}
         />
       )}
     </View>

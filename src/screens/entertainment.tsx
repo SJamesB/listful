@@ -12,6 +12,7 @@ import DraggableFlatList, {
   ScaleDecorator,
 } from 'react-native-draggable-flatlist';
 
+import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
 import { supabase } from '@/lib/supabase';
 
 const C = {
@@ -35,7 +36,8 @@ const TWO_DAYS = () => new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOStrin
 interface EntertainmentItem { id: string; text: string; tag: Tag; created_at: string; sort_order: number | null; }
 interface LogItem { id: string; text: string; tag: Tag; completed_at: string; }
 
-export default function EntertainmentPage() {
+export default function EntertainmentPage({ onEdgesChange }: { onEdgesChange?: EdgesChangeHandler }) {
+  const edgeScroll = useSectionEdgeScroll(onEdgesChange);
   const [items, setItems] = useState<EntertainmentItem[]>([]);
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -247,6 +249,7 @@ export default function EntertainmentPage() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           activationDistance={5}
+          {...edgeScroll}
         />
       )}
     </View>

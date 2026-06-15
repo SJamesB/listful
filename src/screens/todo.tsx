@@ -12,6 +12,7 @@ import DraggableFlatList, {
   ScaleDecorator,
 } from 'react-native-draggable-flatlist';
 
+import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
 import { supabase } from '@/lib/supabase';
 
 const C = {
@@ -26,7 +27,8 @@ const TWO_DAYS = () => new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOStrin
 interface TodoItem { id: string; text: string; created_at: string; sort_order: number | null; }
 interface LogItem  { id: string; text: string; completed_at: string; }
 
-export default function TodoPage() {
+export default function TodoPage({ onEdgesChange }: { onEdgesChange?: EdgesChangeHandler }) {
+  const edgeScroll = useSectionEdgeScroll(onEdgesChange);
   const [items, setItems] = useState<TodoItem[]>([]);
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -195,6 +197,7 @@ export default function TodoPage() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           activationDistance={5}
+          {...edgeScroll}
         />
       )}
     </View>
