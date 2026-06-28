@@ -37,7 +37,9 @@ export default function TodoPage({ onEdgesChange }: { onEdgesChange?: EdgesChang
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
   const [recentOpen, setRecentOpen] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
   const submitting = useRef(false);
+  const selectingSuggestion = useRef(false);
 
   const load = useCallback(async () => {
     const [{ data: active }, { data: recent }] = await Promise.all([
@@ -54,6 +56,26 @@ export default function TodoPage({ onEdgesChange }: { onEdgesChange?: EdgesChang
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => { if (!adding) setSuggestions([]); }, [adding]);
+
+  useEffect(() => {
+    const trimmed = newText.trim();
+    if (!trimmed) { setSuggestions([]); return; }
+    const timer = setTimeout(async () => {
+      const { data } = await supabase
+        .from('todo_logs')
+        .select('text')
+        .ilike('text', `%${trimmed}%`);
+      if (!data) return;
+      const counts: Record<string, number> = {};
+      data.forEach(({ text }) => { counts[text] = (counts[text] ?? 0) + 1; });
+      setSuggestions(
+        Object.entries(counts).filter(([, n]) => n > 3).map(([t]) => t).slice(0, 5)
+      );
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [newText]);
 
   const complete = async (item: TodoItem) => {
     setItems((prev) => prev.filter((i) => i.id !== item.id));
@@ -87,11 +109,23 @@ export default function TodoPage({ onEdgesChange }: { onEdgesChange?: EdgesChang
   };
 
   const add = async () => {
-    if (submitting.current) return;
+    if (submitting.current || selectingSuggestion.current) return;
     const text = newText.trim();
-    if (!text) { setAdding(false); return; }
+    if (!text) { setAdding(false); setSuggestions([]); return; }
     submitting.current = true;
-    setNewText(''); setAdding(false);
+    setNewText(''); setAdding(false); setSuggestions([]);
+    const { data, error } = await supabase.from('todo')
+      .insert({ text, sort_order: items.length }).select().single();
+    if (!error && data) setItems((prev) => [...prev, data]);
+    else if (error) console.error('add failed:', error.message);
+    submitting.current = false;
+  };
+
+  const addSuggestion = async (text: string) => {
+    if (submitting.current) return;
+    selectingSuggestion.current = false;
+    submitting.current = true;
+    setNewText(''); setAdding(false); setSuggestions([]);
     const { data, error } = await supabase.from('todo')
       .insert({ text, sort_order: items.length }).select().single();
     if (!error && data) setItems((prev) => [...prev, data]);
@@ -142,17 +176,34 @@ export default function TodoPage({ onEdgesChange }: { onEdgesChange?: EdgesChang
       )}
       <View style={styles.addRow}>
         {adding ? (
-          <TextInput
-            style={styles.input}
-            value={newText}
-            onChangeText={setNewText}
-            onSubmitEditing={add}
-            onBlur={add}
-            placeholder="new entry..."
-            placeholderTextColor={C.muted}
-            autoFocus
-            returnKeyType="done"
-          />
+          <>
+            <TextInput
+              style={styles.input}
+              value={newText}
+              onChangeText={setNewText}
+              onSubmitEditing={add}
+              onBlur={add}
+              placeholder="new entry..."
+              placeholderTextColor={C.muted}
+              autoFocus
+              returnKeyType="done"
+            />
+            {suggestions.length > 0 && (
+              <View style={styles.suggestions}>
+                {suggestions.map((s) => (
+                  <Pressable
+                    key={s}
+                    onPressIn={() => { selectingSuggestion.current = true; }}
+                    onPressOut={() => { selectingSuggestion.current = false; }}
+                    onPress={() => addSuggestion(s)}
+                    style={({ pressed }) => [styles.suggestionItem, pressed && { opacity: 0.6 }]}
+                  >
+                    <Text style={styles.suggestionText}>{s}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+          </>
         ) : (
           <Pressable onPress={() => setAdding(true)}
             style={({ pressed }) => [{ opacity: pressed ? 0.5 : 1 }]}>
@@ -248,6 +299,23 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: C.accent,
     outlineStyle: 'none',
   } as any,
+  suggestions: {
+    marginTop: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: C.border,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  suggestionItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: C.border,
+  },
+  suggestionText: {
+    fontSize: 14,
+    color: C.text,
+  },
   recentHeader: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingVertical: 14, marginTop: 8,

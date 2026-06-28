@@ -3,7 +3,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -96,11 +98,11 @@ export default function CinemaPosterPage(props: Props) {
   const status = mode === 'watch' ? props.status : undefined;
   const [category, setCategory] = useState<NineClubCategory>('film');
   const [mediaTypeFilter, setMediaTypeFilter] = useState<'movie' | 'tv'>('movie');
-  const searchMediaType = mode === 'watch' && status === 'to_watch' ? mediaTypeFilter : undefined;
+  const searchMediaType = mode === 'watch' ? mediaTypeFilter : undefined;
   const modalCategoryLabel =
     mode === 'nine_club'
       ? NINE_CLUB_CATEGORIES.find((c) => c.key === category)?.label
-      : status === 'to_watch'
+      : mode === 'watch'
         ? WATCHLIST_FILTERS.find((f) => f.key === mediaTypeFilter)?.label
         : undefined;
 
@@ -132,7 +134,7 @@ export default function CinemaPosterPage(props: Props) {
       orderCol = 'nine_club_added_at';
     } else {
       q = q.eq('status', status!);
-      if (status === 'to_watch') q = q.eq('media_type', mediaTypeFilter);
+      q = q.eq('media_type', mediaTypeFilter);
       orderCol = status === 'watched' ? 'watched_at' : 'added_at';
     }
     const { data } = await q.order(orderCol, { ascending: false });
@@ -308,7 +310,7 @@ export default function CinemaPosterPage(props: Props) {
       {mode === 'nine_club' && (
         <FilterRow options={NINE_CLUB_CATEGORIES} active={category} onSelect={setCategory} />
       )}
-      {mode === 'watch' && status === 'to_watch' && (
+      {mode === 'watch' && (
         <FilterRow options={WATCHLIST_FILTERS} active={mediaTypeFilter} onSelect={setMediaTypeFilter} />
       )}
 
@@ -344,7 +346,10 @@ export default function CinemaPosterPage(props: Props) {
         presentationStyle="overFullScreen"
         onRequestClose={() => setSearchOpen(false)}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+        >
           <View style={[styles.modalCard, { maxHeight: height * 0.85 }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
@@ -385,7 +390,7 @@ export default function CinemaPosterPage(props: Props) {
               />
             )}
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       <Modal
