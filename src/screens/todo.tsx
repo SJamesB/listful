@@ -39,7 +39,8 @@ export default function TodoPage({ onEdgesChange }: { onEdgesChange?: EdgesChang
   const [recentOpen, setRecentOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const submitting = useRef(false);
-  const selectingSuggestion = useRef(false);
+  const newTextRef = useRef('');
+  const pendingSuggestion = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     const [{ data: active }, { data: recent }] = await Promise.all([
@@ -112,10 +113,12 @@ export default function TodoPage({ onEdgesChange }: { onEdgesChange?: EdgesChang
   };
 
   const add = async () => {
-    if (submitting.current || selectingSuggestion.current) return;
-    const text = newText.trim();
+    if (submitting.current) return;
+    const text = (pendingSuggestion.current ?? newTextRef.current).trim();
+    pendingSuggestion.current = null;
     if (!text) { setAdding(false); setSuggestions([]); return; }
     submitting.current = true;
+    newTextRef.current = '';
     setNewText(''); setAdding(false); setSuggestions([]);
     const { data, error } = await supabase.from('todo')
       .insert({ text, sort_order: items.length }).select().single();
@@ -124,15 +127,9 @@ export default function TodoPage({ onEdgesChange }: { onEdgesChange?: EdgesChang
     submitting.current = false;
   };
 
-  const addSuggestion = async (text: string) => {
-    if (submitting.current) return;
-    submitting.current = true;
-    setNewText(''); setAdding(false); setSuggestions([]);
-    const { data, error } = await supabase.from('todo')
-      .insert({ text, sort_order: items.length }).select().single();
-    if (!error && data) setItems((prev) => [...prev, data]);
-    else if (error) console.error('add failed:', error.message);
-    submitting.current = false;
+  const addSuggestion = (text: string) => {
+    pendingSuggestion.current = text;
+    add();
   };
 
   const onDragEnd = async ({ data: newOrder }: { data: TodoItem[] }) => {
@@ -182,14 +179,9 @@ export default function TodoPage({ onEdgesChange }: { onEdgesChange?: EdgesChang
             <TextInput
               style={styles.input}
               value={newText}
-              onChangeText={setNewText}
+              onChangeText={(v) => { newTextRef.current = v; setNewText(v); }}
               onSubmitEditing={add}
-              onBlur={() => {
-                setTimeout(() => {
-                  if (selectingSuggestion.current) { selectingSuggestion.current = false; return; }
-                  add();
-                }, 150);
-              }}
+              onBlur={() => setTimeout(add, 150)}
               placeholder="new entry..."
               placeholderTextColor={C.muted}
               autoFocus
@@ -200,7 +192,6 @@ export default function TodoPage({ onEdgesChange }: { onEdgesChange?: EdgesChang
                 {suggestions.map((s) => (
                   <Pressable
                     key={s}
-                    onPressIn={() => { selectingSuggestion.current = true; }}
                     onPress={() => addSuggestion(s)}
                     style={({ pressed }) => [styles.suggestionItem, pressed && { opacity: 0.6 }]}
                   >
