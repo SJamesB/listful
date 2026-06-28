@@ -6,6 +6,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -42,6 +43,8 @@ function noteColor(id: string): string {
   return PASTELS[hash % PASTELS.length];
 }
 
+interface ChecklistItem { id: string; text: string; done: boolean; }
+
 interface Note {
   id: string;
   title: string;
@@ -52,6 +55,29 @@ interface Note {
 
 interface ArchivedNote extends Note {
   archived_at: string;
+}
+
+const genId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+
+function parseContent(content: string): { type: 'text' | 'checklist'; items: ChecklistItem[] } {
+  if (!content?.trim()) return { type: 'text', items: [] };
+  try {
+    const p = JSON.parse(content);
+    if (p?.type === 'checklist' && Array.isArray(p.items)) {
+      return { type: 'checklist', items: p.items };
+    }
+  } catch {}
+  return { type: 'text', items: [] };
+}
+
+function serializeChecklist(items: ChecklistItem[]): string {
+  return JSON.stringify({ type: 'checklist', items });
+}
+
+function contentPreview(content: string): string {
+  const { type, items } = parseContent(content);
+  if (type === 'checklist') return items.map(i => (i.done ? '✓ ' : '• ') + i.text).join('\n');
+  return content;
 }
 
 const CREATE_ID = '__create__' as const;
@@ -77,6 +103,49 @@ function NoteCard({
   onDelete: (id: string) => void;
   onReorder: () => void;
 }) {
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
+  const [addingItem, setAddingItem] = useState(false);
+  const [newItemText, setNewItemText] = useState('');
+
+  const { type: noteType, items } = useMemo(() => parseContent(note.content), [note.content]);
+  const isChecklist = noteType === 'checklist';
+  const unchecked = isChecklist ? items.filter(i => !i.done) : [];
+  const checked = isChecklist ? items.filter(i => i.done) : [];
+
+  const updateItems = (newItems: ChecklistItem[]) =>
+    onUpdate(note.id, { content: serializeChecklist(newItems) });
+
+  const toggleItem = (id: string) => {
+    const next = items.map(item => item.id === id ? { ...item, done: !item.done } : item);
+    updateItems([...next.filter(i => !i.done), ...next.filter(i => i.done)]);
+  };
+
+  const saveEdit = () => {
+    if (!editingItemId) return;
+    const text = editText.trim();
+    if (!text) updateItems(items.filter(i => i.id !== editingItemId));
+    else updateItems(items.map(i => i.id === editingItemId ? { ...i, text } : i));
+    setEditingItemId(null);
+  };
+
+  const addItem = () => {
+    const text = newItemText.trim();
+    setNewItemText('');
+    setAddingItem(false);
+    if (!text) return;
+    updateItems([...unchecked, { id: genId(), text, done: false }, ...checked]);
+  };
+
+  const switchToChecklist = () => {
+    const lines = note.content.split('\n').filter(l => l.trim());
+    updateItems(lines.map(text => ({ id: genId(), text, done: false })));
+  };
+
+  const switchToText = () => {
+    onUpdate(note.id, { content: items.map(i => i.text).filter(Boolean).join('\n') });
+  };
+
   return (
     <View style={[styles.page, { width }]}>
       <View style={[styles.card, { backgroundColor: noteColor(note.id) }]}>
@@ -94,18 +163,89 @@ function NoteCard({
           </Pressable>
         </View>
         <View style={styles.cardDivider} />
-        <TextInput
-          style={styles.contentInput}
-          value={note.content}
-          onChangeText={(v) => onUpdate(note.id, { content: v })}
-          placeholder="Start writing…"
-          placeholderTextColor={C.muted}
-          multiline
-          textAlignVertical="top"
-          scrollEnabled
-        />
+
+        {isChecklist ? (
+          <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            {unchecked.map(item => (
+              <View key={item.id} style={styles.checkRow}>
+                <Pressable onPress={() => toggleItem(item.id)} hitSlop={8}>
+                  <View style={styles.checkCircle} />
+                </Pressable>
+                {editingItemId === item.id ? (
+                  <TextInput
+                    style={styles.checkItemInput}
+                    value={editText}
+                    onChangeText={setEditText}
+                    onSubmitEditing={saveEdit}
+                    onBlur={saveEdit}
+                    autoFocus
+                    returnKeyType="done"
+                  />
+                ) : (
+                  <Pressable style={{ flex: 1 }} onPress={() => { setEditingItemId(item.id); setEditText(item.text); }}>
+                    <Text style={styles.checkItemText}>{item.text}</Text>
+                  </Pressable>
+                )}
+              </View>
+            ))}
+
+            {addingItem ? (
+              <View style={styles.checkRow}>
+                <View style={styles.checkCircle} />
+                <TextInput
+                  style={styles.checkItemInput}
+                  value={newItemText}
+                  onChangeText={setNewItemText}
+                  onSubmitEditing={addItem}
+                  onBlur={addItem}
+                  placeholder="New item..."
+                  placeholderTextColor={C.muted}
+                  autoFocus
+                  returnKeyType="done"
+                />
+              </View>
+            ) : (
+              <Pressable onPress={() => setAddingItem(true)} style={styles.addItemRow}>
+                <Text style={styles.addItemText}>+ Add item</Text>
+              </Pressable>
+            )}
+
+            {checked.length > 0 && (
+              <>
+                <View style={styles.checkedDivider} />
+                {checked.map(item => (
+                  <View key={item.id} style={styles.checkRow}>
+                    <Pressable onPress={() => toggleItem(item.id)} hitSlop={8}>
+                      <View style={styles.checkCircleDone}>
+                        <Text style={styles.checkmark}>✓</Text>
+                      </View>
+                    </Pressable>
+                    <Text style={styles.checkItemDone}>{item.text}</Text>
+                  </View>
+                ))}
+              </>
+            )}
+          </ScrollView>
+        ) : (
+          <TextInput
+            style={styles.contentInput}
+            value={note.content}
+            onChangeText={(v) => onUpdate(note.id, { content: v })}
+            placeholder="Start writing…"
+            placeholderTextColor={C.muted}
+            multiline
+            textAlignVertical="top"
+            scrollEnabled
+          />
+        )}
+
         <Text style={styles.dateText}>{formatDate(note.created_at)}</Text>
         <View style={styles.noteActions}>
+          <Pressable hitSlop={8} onPress={isChecklist ? switchToText : switchToChecklist}>
+            <Text style={[styles.actionText, { color: C.subdued }]}>
+              {isChecklist ? 'Text' : 'Checklist'}
+            </Text>
+          </Pressable>
           <Pressable hitSlop={8} onPress={() => onArchive(note)}>
             <Text style={[styles.actionText, { color: C.subdued }]}>Archive</Text>
           </Pressable>
@@ -165,7 +305,7 @@ function ArchiveView({
             </Text>
             {!!item.content && (
               <Text style={styles.archiveContent} numberOfLines={2}>
-                {item.content}
+                {contentPreview(item.content)}
               </Text>
             )}
             <Text style={styles.archiveMeta}>
@@ -553,6 +693,65 @@ const styles = StyleSheet.create({
   actionText: {
     fontSize: 14,
     fontWeight: '600',
+  },
+
+  // Checklist
+  checkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    gap: 10,
+  },
+  checkCircle: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1.5,
+    borderColor: 'rgba(44,26,14,0.3)',
+  },
+  checkCircleDone: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: C.accent,
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+  },
+  checkmark: {
+    fontSize: 11,
+    color: 'white',
+    fontWeight: '700' as const,
+  },
+  checkItemText: {
+    flex: 1,
+    fontSize: 15,
+    color: C.text,
+  },
+  checkItemDone: {
+    flex: 1,
+    fontSize: 15,
+    color: C.muted,
+    textDecorationLine: 'line-through' as const,
+  },
+  checkItemInput: {
+    flex: 1,
+    fontSize: 15,
+    color: C.text,
+    padding: 0,
+    outlineStyle: 'none',
+  } as any,
+  addItemRow: {
+    paddingVertical: 8,
+    paddingLeft: 28,
+  },
+  addItemText: {
+    fontSize: 14,
+    color: C.muted,
+  },
+  checkedDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(44,26,14,0.1)',
+    marginVertical: 8,
   },
 
   // Reorder modal
