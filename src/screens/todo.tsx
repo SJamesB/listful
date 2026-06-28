@@ -71,7 +71,10 @@ export default function TodoPage({ onEdgesChange }: { onEdgesChange?: EdgesChang
       const counts: Record<string, number> = {};
       data.forEach(({ text }) => { counts[text] = (counts[text] ?? 0) + 1; });
       setSuggestions(
-        Object.entries(counts).filter(([, n]) => n > 3).map(([t]) => t).slice(0, 5)
+        Object.entries(counts)
+          .sort(([, a], [, b]) => b - a)
+          .map(([t]) => t)
+          .slice(0, 5)
       );
     }, 300);
     return () => clearTimeout(timer);
