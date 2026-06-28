@@ -126,7 +126,6 @@ export default function TodoPage({ onEdgesChange }: { onEdgesChange?: EdgesChang
 
   const addSuggestion = async (text: string) => {
     if (submitting.current) return;
-    selectingSuggestion.current = false;
     submitting.current = true;
     setNewText(''); setAdding(false); setSuggestions([]);
     const { data, error } = await supabase.from('todo')
@@ -185,7 +184,12 @@ export default function TodoPage({ onEdgesChange }: { onEdgesChange?: EdgesChang
               value={newText}
               onChangeText={setNewText}
               onSubmitEditing={add}
-              onBlur={add}
+              onBlur={() => {
+                setTimeout(() => {
+                  if (selectingSuggestion.current) { selectingSuggestion.current = false; return; }
+                  add();
+                }, 150);
+              }}
               placeholder="new entry..."
               placeholderTextColor={C.muted}
               autoFocus
@@ -197,7 +201,6 @@ export default function TodoPage({ onEdgesChange }: { onEdgesChange?: EdgesChang
                   <Pressable
                     key={s}
                     onPressIn={() => { selectingSuggestion.current = true; }}
-                    onPressOut={() => { selectingSuggestion.current = false; }}
                     onPress={() => addSuggestion(s)}
                     style={({ pressed }) => [styles.suggestionItem, pressed && { opacity: 0.6 }]}
                   >
