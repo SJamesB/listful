@@ -40,7 +40,6 @@ export default function TodoPage({ onEdgesChange }: { onEdgesChange?: EdgesChang
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const submitting = useRef(false);
   const newTextRef = useRef('');
-  const pendingSuggestion = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     const [{ data: active }, { data: recent }] = await Promise.all([
@@ -114,8 +113,7 @@ export default function TodoPage({ onEdgesChange }: { onEdgesChange?: EdgesChang
 
   const add = async () => {
     if (submitting.current) return;
-    const text = (pendingSuggestion.current ?? newTextRef.current).trim();
-    pendingSuggestion.current = null;
+    const text = newTextRef.current.trim();
     if (!text) { setAdding(false); setSuggestions([]); return; }
     submitting.current = true;
     newTextRef.current = '';
@@ -127,9 +125,10 @@ export default function TodoPage({ onEdgesChange }: { onEdgesChange?: EdgesChang
     submitting.current = false;
   };
 
-  const addSuggestion = (text: string) => {
-    pendingSuggestion.current = text;
-    add();
+  const selectSuggestion = (text: string) => {
+    newTextRef.current = text;
+    setNewText(text);
+    setSuggestions([]);
   };
 
   const onDragEnd = async ({ data: newOrder }: { data: TodoItem[] }) => {
@@ -192,7 +191,7 @@ export default function TodoPage({ onEdgesChange }: { onEdgesChange?: EdgesChang
                 {suggestions.map((s) => (
                   <Pressable
                     key={s}
-                    onPress={() => addSuggestion(s)}
+                    onPress={() => selectSuggestion(s)}
                     style={({ pressed }) => [styles.suggestionItem, pressed && { opacity: 0.6 }]}
                   >
                     <Text style={styles.suggestionText}>{s}</Text>
