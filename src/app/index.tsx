@@ -18,6 +18,7 @@ import { supabase } from '@/lib/supabase';
 import { LogPage } from '@/screens/LogPage';
 import NotesPage from '@/screens/NotesPage';
 import CinemaPosterPage, { type CinemaPosterPageProps } from '@/screens/CinemaPosterPage';
+import LibraryBookPage, { type LibraryBookPageProps } from '@/screens/LibraryBookPage';
 import SpotifyPage from '@/screens/SpotifyPage';
 import SpotifyPlaylistPage from '@/screens/SpotifyPlaylistPage';
 import EntertainmentPage from '@/screens/entertainment';
@@ -43,20 +44,30 @@ const CINEMA_BG = {
   layer1: ['#EDE9FE', '#DDD6FE', '#C4B5FD', '#EDE9FE'] as const,
   layer2: ['#A78BFA', 'transparent', '#7C3AED'] as const,
 };
+const LIBRARY_BG = {
+  layer1: ['#FDE9D0', '#F5D6A8', '#E8C08A', '#FDE9D0'] as const,
+  layer2: ['#C08552', 'transparent', '#8B5A2B'] as const,
+};
 const SPOTIFY_BG = {
   layer1: ['#D1FAE5', '#A7F3D0', '#6EE7B7', '#D1FAE5'] as const,
   layer2: ['#34D399', 'transparent', '#059669'] as const,
 };
 
-export type Section = 'organise' | 'vault' | 'notes' | 'cinema' | 'spotify';
+export type Section = 'organise' | 'vault' | 'notes' | 'cinema' | 'library' | 'spotify';
 
 // Vertical scroll order between sections — matches the side drawer's order.
-const SECTION_ORDER: Section[] = ['organise', 'notes', 'vault', 'cinema', 'spotify'];
+const SECTION_ORDER: Section[] = ['organise', 'notes', 'vault', 'cinema', 'library', 'spotify'];
 
 const CINEMA_MENU_ITEMS = [
   { localIndex: 0, label: '🍿 Watchlist' },
   { localIndex: 1, label: '🎥 Watched' },
   { localIndex: 2, label: '🏆 9-Club' },
+];
+
+const LIBRARY_MENU_ITEMS = [
+  { localIndex: 0, label: '📖 To Read' },
+  { localIndex: 1, label: '✅ Read' },
+  { localIndex: 2, label: '⭐ Favorites' },
 ];
 
 interface SpotifyPinnedPlaylist {
@@ -85,7 +96,7 @@ export default function App() {
   const [vaultConfigs, setVaultConfigs] = useState<CategoryConfig[]>([]);
   const [spotifyPlaylists, setSpotifyPlaylists] = useState<SpotifyPinnedPlaylist[]>([]);
   const [sectionIndex, setSectionIndex] = useState(0);
-  const [sectionPage, setSectionPage] = useState({ organise: 0, vault: 0, notes: 0, cinema: 0, spotify: 0 });
+  const [sectionPage, setSectionPage] = useState({ organise: 0, vault: 0, notes: 0, cinema: 0, library: 0, spotify: 0 });
   const [pagerHeight, setPagerHeight] = useState(0);
 
   const currentSection = SECTION_ORDER[sectionIndex];
@@ -94,6 +105,7 @@ export default function App() {
   const organiseRef = useRef<SectionPagerHandle>(null);
   const vaultRef = useRef<SectionPagerHandle>(null);
   const cinemaRef = useRef<SectionPagerHandle>(null);
+  const libraryRef = useRef<SectionPagerHandle>(null);
   const spotifyRef = useRef<SectionPagerHandle>(null);
 
   // Tracks whether each section's content is scrolled to its top/bottom edge,
@@ -104,6 +116,7 @@ export default function App() {
     notes: { atTop: true, atBottom: true },
     vault: { atTop: true, atBottom: true },
     cinema: { atTop: true, atBottom: true },
+    library: { atTop: true, atBottom: true },
     spotify: { atTop: true, atBottom: true },
   });
 
@@ -115,6 +128,7 @@ export default function App() {
       organise: make('organise'),
       vault: make('vault'),
       cinema: make('cinema'),
+      library: make('library'),
       spotify: make('spotify'),
     };
   }, []);
@@ -192,6 +206,21 @@ export default function App() {
     [vaultConfigs, getVaultComponent],
   );
 
+  // Cache library page components — keyed by page id, props are baked in at creation
+  const libraryCompCache = useRef(new Map<string, SectionItem['Component']>());
+  const getLibraryComponent = useCallback(
+    (id: string, props: LibraryBookPageProps) => {
+      if (!libraryCompCache.current.has(id)) {
+        const Comp = ({ onEdgesChange }: { onEdgesChange?: EdgesChangeHandler }) => (
+          <LibraryBookPage {...props} onEdgesChange={onEdgesChange} />
+        );
+        libraryCompCache.current.set(id, Comp);
+      }
+      return libraryCompCache.current.get(id)!;
+    },
+    [],
+  );
+
   // Cache spotify page components
   const spotifyCompCache = useRef(new Map<string, SectionItem['Component']>());
   const getSpotifyComponent = useCallback(
@@ -227,6 +256,12 @@ export default function App() {
     getCinemaComponent('nineClub',  { title: '🏆 9-Club',     mode: 'nine_club'                      }),
   ], [getCinemaComponent]);
 
+  const libraryPageComponents = useMemo(() => [
+    getLibraryComponent('toRead',   { title: '📖 To Read', mode: 'read',      status: 'to_read' }),
+    getLibraryComponent('read',     { title: '✅ Read',     mode: 'read',      status: 'read'    }),
+    getLibraryComponent('favorites',{ title: '⭐ Favorites', mode: 'favorites'                    }),
+  ], [getLibraryComponent]);
+
   const organiseData = useMemo<SectionItem[]>(() => [
     { id: 'habits',        Component: HabitsPage },
     { id: 'todo',          Component: TodoPage },
@@ -243,6 +278,11 @@ export default function App() {
     [cinemaPageComponents],
   );
 
+  const libraryData = useMemo<SectionItem[]>(
+    () => libraryPageComponents.map((Component, i) => ({ id: `library-${i}`, Component })),
+    [libraryPageComponents],
+  );
+
   const spotifyData = useMemo<SectionItem[]>(
     () => spotifyPageComponents.map((Component, i) => ({ id: `spotify-${i}`, Component })),
     [spotifyPageComponents],
@@ -252,6 +292,7 @@ export default function App() {
     currentSection === 'organise' ? ORGANISE_BG :
     currentSection === 'vault'    ? VAULT_BG :
     currentSection === 'cinema'   ? CINEMA_BG :
+    currentSection === 'library'  ? LIBRARY_BG :
     currentSection === 'spotify'  ? SPOTIFY_BG :
     NOTES_BG;
 
@@ -278,6 +319,7 @@ export default function App() {
       section === 'organise' ? organiseRef :
       section === 'vault'    ? vaultRef :
       section === 'cinema'   ? cinemaRef :
+      section === 'library'  ? libraryRef :
       section === 'spotify'  ? spotifyRef :
       null;
     ref?.current?.scrollToIndex(localIndex);
@@ -329,6 +371,20 @@ export default function App() {
           initialIndex={sectionPage.cinema}
           onPageChange={(i) => setSectionPage((p) => ({ ...p, cinema: i }))}
           onEdgesChange={onEdgesChange.cinema}
+        />
+      ),
+    },
+    {
+      key: 'library',
+      render: () => (
+        <SectionPager
+          ref={libraryRef}
+          data={libraryData}
+          width={width}
+          height={pagerHeight}
+          initialIndex={sectionPage.library}
+          onPageChange={(i) => setSectionPage((p) => ({ ...p, library: i }))}
+          onEdgesChange={onEdgesChange.library}
         />
       ),
     },
@@ -388,6 +444,7 @@ export default function App() {
         onClose={() => setDrawerOpen(false)}
         vaultPages={vaultMenuItems}
         cinemaPages={CINEMA_MENU_ITEMS}
+        libraryPages={LIBRARY_MENU_ITEMS}
         spotifyPages={spotifyMenuItems}
       />
     </View>

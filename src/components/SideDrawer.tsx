@@ -25,6 +25,7 @@ interface Props {
   onClose: () => void;
   vaultPages: MenuItem[];
   cinemaPages: MenuItem[];
+  libraryPages: MenuItem[];
   spotifyPages: MenuItem[];
 }
 
@@ -36,6 +37,7 @@ export function SideDrawer({
   onClose,
   vaultPages,
   cinemaPages,
+  libraryPages,
   spotifyPages,
 }: Props) {
   const insets = useSafeAreaInsets();
@@ -161,6 +163,25 @@ export function SideDrawer({
               onPress={() => onSelectPage('cinema', item.localIndex)}
             >
               <Text style={[styles.itemText, isActive('cinema', item) && styles.itemTextActive]}>
+                {item.label}
+              </Text>
+            </Pressable>
+          ))}
+
+          <View style={styles.divider} />
+
+          {/* Library */}
+          <Pressable style={styles.sectionHeader} onPress={() => toggle('library')} hitSlop={8}>
+            <Text style={styles.sectionLabel}>Library</Text>
+            <Text style={styles.chevron}>{expanded.has('library') ? '▾' : '▸'}</Text>
+          </Pressable>
+          {expanded.has('library') && libraryPages.map((item) => (
+            <Pressable
+              key={item.localIndex}
+              style={[styles.item, isActive('library', item) && styles.itemActive]}
+              onPress={() => onSelectPage('library', item.localIndex)}
+            >
+              <Text style={[styles.itemText, isActive('library', item) && styles.itemTextActive]}>
                 {item.label}
               </Text>
             </Pressable>
