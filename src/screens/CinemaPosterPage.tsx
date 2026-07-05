@@ -1,4 +1,5 @@
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -7,6 +8,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -25,6 +27,7 @@ const C = {
 } as const;
 
 const POSTER_BASE = 'https://image.tmdb.org/t/p/w342';
+const POSTER_BASE_LG = 'https://image.tmdb.org/t/p/w780';
 const COLS = 3;
 const PADDING = 16;
 const GAP = 6;
@@ -48,6 +51,15 @@ interface SearchResult {
   poster_path: string | null;
 }
 
+interface DetailData {
+  overview: string | null;
+  director?: string | null;
+  created_by?: string | null;
+  studio: string | null;
+  composer: string | null;
+  year: string | null;
+}
+
 export type CinemaPosterPageProps =
   | { title: string; mode: 'watch'; status: 'to_watch' | 'watched' }
   | { title: string; mode: 'nine_club' };
@@ -69,6 +81,15 @@ const WATCHLIST_FILTERS: { key: 'movie' | 'tv'; label: string }[] = [
 
 const posterUri = (path: string | null) => (path ? `${POSTER_BASE}${path}` : null);
 const resultKey = (tmdbId: number, mediaType: string) => `${tmdbId}-${mediaType}`;
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.detailRow}>
+      <Text style={styles.detailLabel}>{label}</Text>
+      <Text style={styles.detailValue} numberOfLines={3}>{value}</Text>
+    </View>
+  );
+}
 
 function FilterRow<T extends string>({ options, active, onSelect }: {
   options: { key: T; label: string }[];
@@ -111,6 +132,7 @@ export default function CinemaPosterPage(props: Props) {
   const posterHeight = posterWidth * 1.5;
   const resultWidth = (width - MODAL_PADDING * 2 - GAP * (COLS - 1)) / COLS;
   const resultHeight = resultWidth * 1.5;
+  const posterDetailWidth = width * 0.52;
 
   const [items, setItems] = useState<CinemaItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -123,6 +145,10 @@ export default function CinemaPosterPage(props: Props) {
   const [addedKeys, setAddedKeys] = useState<Set<string>>(new Set());
 
   const [actionItem, setActionItem] = useState<CinemaItem | null>(null);
+
+  const [detailItem, setDetailItem] = useState<CinemaItem | null>(null);
+  const [detailData, setDetailData] = useState<DetailData | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const load = useCallback(async () => {
     let q = supabase
@@ -237,6 +263,25 @@ export default function CinemaPosterPage(props: Props) {
     load();
   };
 
+  const openDetail = useCallback(async (item: CinemaItem) => {
+    setDetailItem(item);
+    setDetailData(null);
+    setDetailLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('tmdb-details', {
+        body: { tmdb_id: item.tmdb_id, media_type: item.media_type },
+      });
+      if (!error && !data?.error) setDetailData(data as DetailData);
+    } finally {
+      setDetailLoading(false);
+    }
+  }, []);
+
+  const closeDetail = useCallback(() => {
+    setDetailItem(null);
+    setDetailData(null);
+  }, []);
+
   const removeFromNineClub = async (item: CinemaItem) => {
     await supabase
       .from('cinema_items')
@@ -249,6 +294,7 @@ export default function CinemaPosterPage(props: Props) {
   const renderItem = ({ item }: { item: CinemaItem }) => (
     <Pressable
       style={[styles.posterWrap, { width: posterWidth }]}
+      onPress={() => openDetail(item)}
       onLongPress={() => setActionItem(item)}
       delayLongPress={350}
     >
@@ -391,6 +437,78 @@ export default function CinemaPosterPage(props: Props) {
             )}
           </View>
         </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Poster detail modal */}
+      <Modal
+        visible={!!detailItem}
+        animationType="fade"
+        transparent
+        presentationStyle="overFullScreen"
+        onRequestClose={closeDetail}
+      >
+        <View style={styles.detailOverlay}>
+          {detailItem?.poster_path && (
+            <Image
+              source={{ uri: `${POSTER_BASE_LG}${detailItem.poster_path}` }}
+              style={[StyleSheet.absoluteFill, { opacity: 0.18 }]}
+              contentFit="cover"
+              blurRadius={25}
+            />
+          )}
+          <LinearGradient
+            colors={['rgba(8,8,8,0.1)', '#080808']}
+            locations={[0, 0.5]}
+            style={StyleSheet.absoluteFill}
+          />
+          <Pressable style={styles.detailClose} onPress={closeDetail} hitSlop={12}>
+            <Text style={styles.detailCloseText}>✕</Text>
+          </Pressable>
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={styles.detailContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {detailItem?.poster_path ? (
+              <Image
+                source={{ uri: `${POSTER_BASE_LG}${detailItem.poster_path}` }}
+                style={[styles.detailPoster, { width: posterDetailWidth, height: posterDetailWidth * 1.5 }]}
+                contentFit="cover"
+              />
+            ) : (
+              <View style={[styles.detailPoster, styles.detailPosterFallback, { width: posterDetailWidth, height: posterDetailWidth * 1.5 }]}>
+                <Text style={{ fontSize: 48 }}>{detailItem?.media_type === 'tv' ? '📺' : '🎬'}</Text>
+              </View>
+            )}
+            <Text style={styles.detailTitle}>{detailItem?.title}</Text>
+            <Text style={styles.detailMetaText}>
+              {[detailItem?.year, detailItem?.media_type === 'tv' ? 'Series' : 'Film'].filter(Boolean).join(' · ')}
+            </Text>
+            {detailLoading ? (
+              <ActivityIndicator color="rgba(255,255,255,0.35)" style={{ marginTop: 20 }} />
+            ) : detailData ? (
+              <>
+                {detailData.overview ? (
+                  <Text style={styles.detailOverview}>{detailData.overview}</Text>
+                ) : null}
+                <View style={styles.detailFields}>
+                  {detailItem?.media_type === 'movie' && detailData.director ? (
+                    <DetailRow label="Director" value={detailData.director} />
+                  ) : null}
+                  {detailItem?.media_type === 'tv' && detailData.created_by ? (
+                    <DetailRow label="Created by" value={detailData.created_by} />
+                  ) : null}
+                  {detailData.studio ? (
+                    <DetailRow label={detailItem?.media_type === 'tv' ? 'Network' : 'Studio'} value={detailData.studio} />
+                  ) : null}
+                  {detailData.composer ? (
+                    <DetailRow label="Score" value={detailData.composer} />
+                  ) : null}
+                </View>
+              </>
+            ) : null}
+          </ScrollView>
+        </View>
       </Modal>
 
       <Modal
@@ -568,6 +686,101 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   addedBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  // Detail modal
+  detailOverlay: {
+    flex: 1,
+    backgroundColor: '#080808',
+  },
+  detailClose: {
+    position: 'absolute',
+    top: 56,
+    right: 20,
+    zIndex: 10,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailCloseText: {
+    color: 'rgba(255,255,255,0.65)',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  detailContent: {
+    paddingTop: 72,
+    paddingHorizontal: 28,
+    paddingBottom: 64,
+    alignItems: 'center',
+  },
+  detailPoster: {
+    borderRadius: 10,
+    marginBottom: 22,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.7,
+    shadowRadius: 24,
+    elevation: 14,
+  },
+  detailPosterFallback: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#fff',
+    textAlign: 'center',
+    letterSpacing: -0.4,
+    marginBottom: 8,
+  },
+  detailMetaText: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.38)',
+    fontWeight: '500',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    marginBottom: 24,
+  },
+  detailOverview: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.6)',
+    lineHeight: 22,
+    textAlign: 'center',
+    marginBottom: 28,
+  },
+  detailFields: {
+    width: '100%',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.07)',
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.07)',
+  },
+  detailLabel: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.3)',
+    fontWeight: '600',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    flex: 1,
+    paddingTop: 2,
+  },
+  detailValue: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.82)',
+    fontWeight: '500',
+    flex: 2,
+    textAlign: 'right',
+    lineHeight: 20,
+  },
   // Action modal
   actionOverlay: {
     flex: 1,
