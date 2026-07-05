@@ -1,0 +1,41 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Android APK with EAS
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          npx eas-cli build --platform android --profile preview --non-interactive --wait --json > eas-build-result.json
+          cat eas-build-result.json
+
+      - name: Publish download link
+        run: |
+          URL=$(node -e "const r=JSON.parse(require('fs').readFileSync('eas-build-result.json','utf8')); const b=Array.isArray(r)?r[0]:r; console.log(b.artifacts && b.artifacts.buildUrl ? b.artifacts.buildUrl : '');")
+          if [ -z "$URL" ]; then
+            echo "Could not find a download URL in the build result — check the build log above."
+            exit 1
+          fi
+          echo "APK download URL: $URL"
+          {
+            echo "### APK download link"
+            echo "$URL"
+          } >> "$GITHUB_STEP_SUMMARY"
