@@ -40,6 +40,8 @@ export default function TodoPage({ onEdgesChange }: { onEdgesChange?: EdgesChang
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const submitting = useRef(false);
   const newTextRef = useRef('');
+  const inputRef = useRef<TextInput>(null);
+  const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
     const [{ data: active }, { data: recent }] = await Promise.all([
@@ -126,9 +128,14 @@ export default function TodoPage({ onEdgesChange }: { onEdgesChange?: EdgesChang
   };
 
   const selectSuggestion = (text: string) => {
+    if (blurTimer.current !== null) {
+      clearTimeout(blurTimer.current);
+      blurTimer.current = null;
+    }
     newTextRef.current = text;
     setNewText(text);
     setSuggestions([]);
+    inputRef.current?.focus();
   };
 
   const onDragEnd = async ({ data: newOrder }: { data: TodoItem[] }) => {
@@ -176,11 +183,12 @@ export default function TodoPage({ onEdgesChange }: { onEdgesChange?: EdgesChang
         {adding ? (
           <>
             <TextInput
+              ref={inputRef}
               style={styles.input}
               value={newText}
               onChangeText={(v) => { newTextRef.current = v; setNewText(v); }}
               onSubmitEditing={add}
-              onBlur={() => setTimeout(add, 150)}
+              onBlur={() => { if (suggestions.length === 0) blurTimer.current = setTimeout(add, 150); }}
               placeholder="new entry..."
               placeholderTextColor={C.muted}
               autoFocus
