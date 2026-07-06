@@ -26,7 +26,6 @@ const C = {
   danger: '#DC2626',
 } as const;
 
-const COVER_BASE = 'https://covers.openlibrary.org/b/id';
 const COLS = 3;
 const PADDING = 16;
 const GAP = 6;
@@ -35,19 +34,19 @@ const SEARCH_DEBOUNCE_MS = 400;
 
 interface LibraryItem {
   id: string;
-  olid: string;
+  google_id: string;
   title: string;
   author: string | null;
   year: string | null;
-  cover_id: number | null;
+  cover_url: string | null;
 }
 
 interface SearchResult {
-  olid: string;
+  google_id: string;
   title: string;
   author: string | null;
   year: string | null;
-  cover_id: number | null;
+  cover_url: string | null;
 }
 
 interface DetailData {
@@ -61,8 +60,8 @@ export type LibraryBookPageProps =
 
 type Props = LibraryBookPageProps & { onEdgesChange?: EdgesChangeHandler };
 
-const coverUri = (coverId: number | null, size: 'M' | 'L' = 'M') =>
-  coverId ? `${COVER_BASE}/${coverId}-${size}.jpg` : null;
+const coverUri = (coverUrl: string | null, size: 'M' | 'L' = 'M') =>
+  coverUrl && size === 'L' ? coverUrl.replace('zoom=1', 'zoom=3') : coverUrl;
 
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
@@ -104,7 +103,7 @@ export default function LibraryBookPage(props: Props) {
   const load = useCallback(async () => {
     let q = supabase
       .from('library_items')
-      .select('id, olid, title, author, year, cover_id');
+      .select('id, google_id, title, author, year, cover_url');
     let orderCol: string;
     if (mode === 'favorites') {
       q = q.not('favorite_added_at', 'is', null);
@@ -123,11 +122,11 @@ export default function LibraryBookPage(props: Props) {
   }, [load]);
 
   const existingKeys = useMemo(
-    () => new Set(items.map((i) => i.olid)),
+    () => new Set(items.map((i) => i.google_id)),
     [items],
   );
 
-  // Debounced Open Library search
+  // Debounced Google Books search
   useEffect(() => {
     if (!searchOpen) return;
     const trimmed = query.trim();
@@ -168,11 +167,11 @@ export default function LibraryBookPage(props: Props) {
   const addResult = async (result: SearchResult) => {
     const now = new Date().toISOString();
     const payload: Record<string, unknown> = {
-      olid: result.olid,
+      google_id: result.google_id,
       title: result.title,
       author: result.author,
       year: result.year,
-      cover_id: result.cover_id,
+      cover_url: result.cover_url,
     };
     if (mode === 'favorites') {
       payload.favorite_added_at = now;
@@ -181,9 +180,9 @@ export default function LibraryBookPage(props: Props) {
       payload.added_at = now;
       payload.read_at = status === 'read' ? now : null;
     }
-    const { error } = await supabase.from('library_items').upsert(payload, { onConflict: 'olid' });
+    const { error } = await supabase.from('library_items').upsert(payload, { onConflict: 'google_id' });
     if (!error) {
-      setAddedKeys((prev) => new Set(prev).add(result.olid));
+      setAddedKeys((prev) => new Set(prev).add(result.google_id));
       load();
     }
   };
@@ -227,7 +226,7 @@ export default function LibraryBookPage(props: Props) {
     setDetailLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke('books-details', {
-        body: { olid: item.olid },
+        body: { google_id: item.google_id },
       });
       if (!error && !data?.error) setDetailData(data as DetailData);
     } finally {
@@ -247,9 +246,9 @@ export default function LibraryBookPage(props: Props) {
       onLongPress={() => setActionItem(item)}
       delayLongPress={350}
     >
-      {item.cover_id ? (
+      {item.cover_url ? (
         <Image
-          source={{ uri: coverUri(item.cover_id)! }}
+          source={{ uri: coverUri(item.cover_url)! }}
           style={[styles.cover, { width: coverWidth, height: coverHeight }]}
           contentFit="cover"
         />
@@ -262,13 +261,13 @@ export default function LibraryBookPage(props: Props) {
   );
 
   const renderResult = ({ item }: { item: SearchResult }) => {
-    const added = existingKeys.has(item.olid) || addedKeys.has(item.olid);
+    const added = existingKeys.has(item.google_id) || addedKeys.has(item.google_id);
     return (
       <Pressable style={[styles.resultWrap, { width: resultWidth }]} onPress={() => addResult(item)}>
         <View>
-          {item.cover_id ? (
+          {item.cover_url ? (
             <Image
-              source={{ uri: coverUri(item.cover_id)! }}
+              source={{ uri: coverUri(item.cover_url)! }}
               style={[styles.resultCover, { width: resultWidth, height: resultHeight }]}
               contentFit="cover"
             />
@@ -362,7 +361,7 @@ export default function LibraryBookPage(props: Props) {
               <FlatList
                 style={styles.resultsList}
                 data={results}
-                keyExtractor={(item) => item.olid}
+                keyExtractor={(item) => item.google_id}
                 renderItem={renderResult}
                 numColumns={COLS}
                 columnWrapperStyle={{ gap: GAP }}
@@ -387,9 +386,9 @@ export default function LibraryBookPage(props: Props) {
         onRequestClose={closeDetail}
       >
         <View style={styles.detailOverlay}>
-          {detailItem?.cover_id && (
+          {detailItem?.cover_url && (
             <Image
-              source={{ uri: coverUri(detailItem.cover_id, 'L')! }}
+              source={{ uri: coverUri(detailItem.cover_url, 'L')! }}
               style={[StyleSheet.absoluteFill, { opacity: 0.18 }]}
               contentFit="cover"
               blurRadius={25}
@@ -408,9 +407,9 @@ export default function LibraryBookPage(props: Props) {
             contentContainerStyle={styles.detailContent}
             showsVerticalScrollIndicator={false}
           >
-            {detailItem?.cover_id ? (
+            {detailItem?.cover_url ? (
               <Image
-                source={{ uri: coverUri(detailItem.cover_id, 'L')! }}
+                source={{ uri: coverUri(detailItem.cover_url, 'L')! }}
                 style={[styles.detailCover, { width: coverDetailWidth, height: coverDetailWidth * 1.5 }]}
                 contentFit="cover"
               />
