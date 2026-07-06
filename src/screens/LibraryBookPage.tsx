@@ -34,24 +34,20 @@ const SEARCH_DEBOUNCE_MS = 400;
 
 interface LibraryItem {
   id: string;
-  google_id: string;
   title: string;
   author: string | null;
   year: string | null;
   cover_url: string | null;
+  genre: string | null;
 }
 
 interface SearchResult {
-  google_id: string;
+  key: string;
   title: string;
   author: string | null;
   year: string | null;
   cover_url: string | null;
-}
-
-interface DetailData {
-  description: string | null;
-  subjects: string | null;
+  genre: string | null;
 }
 
 export type LibraryBookPageProps =
@@ -60,8 +56,15 @@ export type LibraryBookPageProps =
 
 type Props = LibraryBookPageProps & { onEdgesChange?: EdgesChangeHandler };
 
-const coverUri = (coverUrl: string | null, size: 'M' | 'L' = 'M') =>
-  coverUrl && size === 'L' ? coverUrl.replace('zoom=1', 'zoom=3') : coverUrl;
+const matchKey = (title: string, author: string | null) =>
+  `${title.trim().toLowerCase()}|${(author ?? '').trim().toLowerCase()}`;
+
+const coverUri = (coverUrl: string | null, size: 'M' | 'L' = 'M') => {
+  if (!coverUrl || size !== 'L') return coverUrl;
+  if (coverUrl.includes('zoom=1')) return coverUrl.replace('zoom=1', 'zoom=3');
+  if (coverUrl.endsWith('-M.jpg')) return coverUrl.replace(/-M\.jpg$/, '-L.jpg');
+  return coverUrl;
+};
 
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
@@ -97,13 +100,11 @@ export default function LibraryBookPage(props: Props) {
   const [actionItem, setActionItem] = useState<LibraryItem | null>(null);
 
   const [detailItem, setDetailItem] = useState<LibraryItem | null>(null);
-  const [detailData, setDetailData] = useState<DetailData | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
 
   const load = useCallback(async () => {
     let q = supabase
       .from('library_items')
-      .select('id, google_id, title, author, year, cover_url');
+      .select('id, title, author, year, cover_url, genre');
     let orderCol: string;
     if (mode === 'favorites') {
       q = q.not('favorite_added_at', 'is', null);
@@ -122,7 +123,7 @@ export default function LibraryBookPage(props: Props) {
   }, [load]);
 
   const existingKeys = useMemo(
-    () => new Set(items.map((i) => i.google_id)),
+    () => new Set(items.map((i) => matchKey(i.title, i.author))),
     [items],
   );
 
@@ -167,11 +168,11 @@ export default function LibraryBookPage(props: Props) {
   const addResult = async (result: SearchResult) => {
     const now = new Date().toISOString();
     const payload: Record<string, unknown> = {
-      google_id: result.google_id,
       title: result.title,
       author: result.author,
       year: result.year,
       cover_url: result.cover_url,
+      genre: result.genre,
     };
     if (mode === 'favorites') {
       payload.favorite_added_at = now;
@@ -180,9 +181,9 @@ export default function LibraryBookPage(props: Props) {
       payload.added_at = now;
       payload.read_at = status === 'read' ? now : null;
     }
-    const { error } = await supabase.from('library_items').upsert(payload, { onConflict: 'google_id' });
+    const { error } = await supabase.from('library_items').insert(payload);
     if (!error) {
-      setAddedKeys((prev) => new Set(prev).add(result.google_id));
+      setAddedKeys((prev) => new Set(prev).add(result.key));
       load();
     }
   };
@@ -220,23 +221,12 @@ export default function LibraryBookPage(props: Props) {
     load();
   };
 
-  const openDetail = useCallback(async (item: LibraryItem) => {
+  const openDetail = useCallback((item: LibraryItem) => {
     setDetailItem(item);
-    setDetailData(null);
-    setDetailLoading(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('books-details', {
-        body: { google_id: item.google_id },
-      });
-      if (!error && !data?.error) setDetailData(data as DetailData);
-    } finally {
-      setDetailLoading(false);
-    }
   }, []);
 
   const closeDetail = useCallback(() => {
     setDetailItem(null);
-    setDetailData(null);
   }, []);
 
   const renderItem = ({ item }: { item: LibraryItem }) => (
@@ -261,7 +251,7 @@ export default function LibraryBookPage(props: Props) {
   );
 
   const renderResult = ({ item }: { item: SearchResult }) => {
-    const added = existingKeys.has(item.google_id) || addedKeys.has(item.google_id);
+    const added = existingKeys.has(matchKey(item.title, item.author)) || addedKeys.has(item.key);
     return (
       <Pressable style={[styles.resultWrap, { width: resultWidth }]} onPress={() => addResult(item)}>
         <View>
@@ -361,7 +351,7 @@ export default function LibraryBookPage(props: Props) {
               <FlatList
                 style={styles.resultsList}
                 data={results}
-                keyExtractor={(item) => item.google_id}
+                keyExtractor={(item) => item.key}
                 renderItem={renderResult}
                 numColumns={COLS}
                 columnWrapperStyle={{ gap: GAP }}
@@ -422,19 +412,10 @@ export default function LibraryBookPage(props: Props) {
             <Text style={styles.detailMetaText}>
               {[detailItem?.author, detailItem?.year].filter(Boolean).join(' · ')}
             </Text>
-            {detailLoading ? (
-              <ActivityIndicator color="rgba(255,255,255,0.35)" style={{ marginTop: 20 }} />
-            ) : detailData ? (
-              <>
-                {detailData.description ? (
-                  <Text style={styles.detailOverview}>{detailData.description}</Text>
-                ) : null}
-                {detailData.subjects ? (
-                  <View style={styles.detailFields}>
-                    <DetailRow label="Genre" value={detailData.subjects} />
-                  </View>
-                ) : null}
-              </>
+            {detailItem?.genre ? (
+              <View style={styles.detailFields}>
+                <DetailRow label="Genre" value={detailItem.genre} />
+              </View>
             ) : null}
           </ScrollView>
         </View>
