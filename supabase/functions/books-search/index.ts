@@ -3,22 +3,24 @@ const CORS = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const OPEN_LIBRARY_BASE = 'https://openlibrary.org';
+const GOOGLE_BOOKS_BASE = 'https://www.googleapis.com/books/v1/volumes';
 
 interface LibraryResult {
-  olid: string;
+  google_id: string;
   title: string;
   author: string | null;
   year: string | null;
-  cover_id: number | null;
+  cover_url: string | null;
 }
 
-interface OpenLibraryDoc {
-  key: string;
-  title?: string;
-  author_name?: string[];
-  first_publish_year?: number;
-  cover_i?: number;
+interface GoogleVolume {
+  id: string;
+  volumeInfo?: {
+    title?: string;
+    authors?: string[];
+    publishedDate?: string;
+    imageLinks?: { thumbnail?: string; smallThumbnail?: string };
+  };
 }
 
 function respond(data: unknown, status = 200) {
@@ -28,14 +30,16 @@ function respond(data: unknown, status = 200) {
   });
 }
 
-function toResult(doc: OpenLibraryDoc): LibraryResult | null {
-  if (!doc.title || !doc.key) return null;
+function toResult(volume: GoogleVolume): LibraryResult | null {
+  const info = volume.volumeInfo;
+  if (!info?.title || !volume.id) return null;
+  const thumbnail = info.imageLinks?.thumbnail ?? info.imageLinks?.smallThumbnail ?? null;
   return {
-    olid: doc.key.replace('/works/', ''),
-    title: doc.title,
-    author: doc.author_name?.join(', ') ?? null,
-    year: doc.first_publish_year ? String(doc.first_publish_year) : null,
-    cover_id: doc.cover_i ?? null,
+    google_id: volume.id,
+    title: info.title,
+    author: info.authors?.join(', ') ?? null,
+    year: info.publishedDate ? info.publishedDate.slice(0, 4) : null,
+    cover_url: thumbnail ? thumbnail.replace(/^http:/, 'https:') : null,
   };
 }
 
@@ -49,15 +53,19 @@ Deno.serve(async (req) => {
     const { query } = body as { query?: string };
     if (!query?.trim()) return respond({ error: 'query is required' });
 
-    const url = `${OPEN_LIBRARY_BASE}/search.json?q=${encodeURIComponent(query.trim())}&limit=24&fields=key,title,author_name,first_publish_year,cover_i`;
+    const apiKey = Deno.env.get('GOOGLE_BOOKS_API_KEY');
+    const params = new URLSearchParams({ q: query.trim(), maxResults: '24' });
+    if (apiKey) params.set('key', apiKey);
+
+    const url = `${GOOGLE_BOOKS_BASE}?${params.toString()}`;
     const res = await fetch(url);
 
     if (!res.ok) {
-      return respond({ error: `Open Library returned HTTP ${res.status}` });
+      return respond({ error: `Google Books returned HTTP ${res.status}` });
     }
 
     const data = await res.json();
-    const results = ((data.docs ?? []) as OpenLibraryDoc[])
+    const results = ((data.items ?? []) as GoogleVolume[])
       .map(toResult)
       .filter((item): item is LibraryResult => item !== null);
 
