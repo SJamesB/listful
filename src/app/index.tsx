@@ -66,8 +66,8 @@ const CINEMA_MENU_ITEMS = [
 
 const LIBRARY_MENU_ITEMS = [
   { localIndex: 0, label: '📖 To Read' },
-  { localIndex: 1, label: '✅ Read' },
-  { localIndex: 2, label: '⭐ Favorites' },
+  { localIndex: 1, label: '📚 Read' },
+  { localIndex: 2, label: '🏆 9-Club' },
 ];
 
 interface SpotifyPinnedPlaylist {
@@ -258,8 +258,8 @@ export default function App() {
 
   const libraryPageComponents = useMemo(() => [
     getLibraryComponent('toRead',   { title: '📖 To Read', mode: 'read',      status: 'to_read' }),
-    getLibraryComponent('read',     { title: '✅ Read',     mode: 'read',      status: 'read'    }),
-    getLibraryComponent('favorites',{ title: '⭐ Favorites', mode: 'favorites'                    }),
+    getLibraryComponent('read',     { title: '📚 Read',     mode: 'read',      status: 'read'    }),
+    getLibraryComponent('favorites',{ title: '🏆 9-Club',  mode: 'favorites'                    }),
   ], [getLibraryComponent]);
 
   const organiseData = useMemo<SectionItem[]>(() => [

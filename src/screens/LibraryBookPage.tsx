@@ -455,7 +455,7 @@ export default function LibraryBookPage(props: Props) {
                 style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
                 onPress={() => actionItem && removeFromFavorites(actionItem)}
               >
-                <Text style={styles.actionBtnText}>Remove from Favorites</Text>
+                <Text style={styles.actionBtnText}>Remove from 9-Club</Text>
               </Pressable>
             ) : status === 'to_read' ? (
               <Pressable
