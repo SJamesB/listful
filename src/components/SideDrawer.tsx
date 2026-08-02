@@ -26,7 +26,6 @@ interface Props {
   vaultPages: MenuItem[];
   cinemaPages: MenuItem[];
   libraryPages: MenuItem[];
-  spotifyPages: MenuItem[];
 }
 
 export function SideDrawer({
@@ -38,7 +37,6 @@ export function SideDrawer({
   vaultPages,
   cinemaPages,
   libraryPages,
-  spotifyPages,
 }: Props) {
   const insets = useSafeAreaInsets();
   const translateX = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
@@ -182,25 +180,6 @@ export function SideDrawer({
               onPress={() => onSelectPage('library', item.localIndex)}
             >
               <Text style={[styles.itemText, isActive('library', item) && styles.itemTextActive]}>
-                {item.label}
-              </Text>
-            </Pressable>
-          ))}
-
-          <View style={styles.divider} />
-
-          {/* Spotify */}
-          <Pressable style={styles.sectionHeader} onPress={() => toggle('spotify')} hitSlop={8}>
-            <Text style={styles.sectionLabel}>Music</Text>
-            <Text style={styles.chevron}>{expanded.has('spotify') ? '▾' : '▸'}</Text>
-          </Pressable>
-          {expanded.has('spotify') && spotifyPages.map((item) => (
-            <Pressable
-              key={item.localIndex}
-              style={[styles.item, isActive('spotify', item) && styles.itemActive]}
-              onPress={() => onSelectPage('spotify', item.localIndex)}
-            >
-              <Text style={[styles.itemText, isActive('spotify', item) && styles.itemTextActive]}>
                 {item.label}
               </Text>
             </Pressable>
