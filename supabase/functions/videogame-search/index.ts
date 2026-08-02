@@ -3,21 +3,43 @@ const CORS = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const GIANTBOMB_BASE = 'https://www.giantbomb.com/api';
-const USER_AGENT = 'Listful/1.0 (contact: samboote93@gmail.com)';
+const IGDB_BASE = 'https://api.igdb.com/v4';
+const TWITCH_TOKEN_URL = 'https://id.twitch.tv/oauth2/token';
 
 interface VideogameResult {
-  giantbomb_id: string;
+  igdb_id: string;
   title: string;
   year: string | null;
   cover_url: string | null;
 }
 
-interface GiantBombGame {
-  guid: string;
+interface IGDBGame {
+  id: number;
   name: string;
-  original_release_date: string | null;
-  image?: { medium_url?: string | null } | null;
+  first_release_date?: number;
+  cover?: { url?: string } | null;
+}
+
+let cachedToken: { token: string; expiresAt: number } | null = null;
+
+async function getAccessToken(clientId: string, clientSecret: string): Promise<string> {
+  if (cachedToken && cachedToken.expiresAt > Date.now()) return cachedToken.token;
+  const params = new URLSearchParams({
+    client_id: clientId,
+    client_secret: clientSecret,
+    grant_type: 'client_credentials',
+  });
+  const res = await fetch(`${TWITCH_TOKEN_URL}?${params.toString()}`, { method: 'POST' });
+  if (!res.ok) throw new Error(`Twitch token request returned HTTP ${res.status}`);
+  const data = await res.json();
+  cachedToken = { token: data.access_token, expiresAt: Date.now() + (data.expires_in - 60) * 1000 };
+  return cachedToken.token;
+}
+
+function coverUrl(cover?: { url?: string } | null): string | null {
+  if (!cover?.url) return null;
+  const upgraded = cover.url.replace('t_thumb', 't_cover_big');
+  return upgraded.startsWith('//') ? `https:${upgraded}` : upgraded;
 }
 
 function respond(data: unknown, status = 200) {
@@ -27,13 +49,15 @@ function respond(data: unknown, status = 200) {
   });
 }
 
-function toResult(game: GiantBombGame): VideogameResult | null {
-  if (!game.name || !game.guid) return null;
+function toResult(game: IGDBGame): VideogameResult | null {
+  if (!game.name) return null;
   return {
-    giantbomb_id: game.guid,
+    igdb_id: String(game.id),
     title: game.name,
-    year: game.original_release_date ? game.original_release_date.slice(0, 4) : null,
-    cover_url: game.image?.medium_url ?? null,
+    year: game.first_release_date
+      ? new Date(game.first_release_date * 1000).getUTCFullYear().toString()
+      : null,
+    cover_url: coverUrl(game.cover),
   };
 }
 
@@ -43,35 +67,36 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const apiKey = Deno.env.get('GIANTBOMB_API_KEY');
-    if (!apiKey) return respond({ error: 'GIANTBOMB_API_KEY is not configured' });
+    const clientId = Deno.env.get('IGDB_CLIENT_ID');
+    const clientSecret = Deno.env.get('IGDB_CLIENT_SECRET');
+    if (!clientId || !clientSecret) {
+      return respond({ error: 'IGDB_CLIENT_ID / IGDB_CLIENT_SECRET are not configured' });
+    }
 
     const body = await req.json();
     const { query } = body as { query?: string };
     if (!query?.trim()) return respond({ error: 'query is required' });
 
-    const params = new URLSearchParams({
-      api_key: apiKey,
-      format: 'json',
-      query: query.trim(),
-      resources: 'game',
-      field_list: 'guid,name,image,original_release_date',
-      limit: '24',
-    });
-    const res = await fetch(`${GIANTBOMB_BASE}/search/?${params.toString()}`, {
-      headers: { 'User-Agent': USER_AGENT },
+    const token = await getAccessToken(clientId, clientSecret);
+    const escaped = query.trim().replace(/"/g, '\\"');
+    const apicalypse = `search "${escaped}"; fields id,name,cover.url,first_release_date; limit 24;`;
+
+    const res = await fetch(`${IGDB_BASE}/games`, {
+      method: 'POST',
+      headers: {
+        'Client-ID': clientId,
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'text/plain',
+      },
+      body: apicalypse,
     });
 
     if (!res.ok) {
-      return respond({ error: `Giant Bomb returned HTTP ${res.status}` });
+      return respond({ error: `IGDB returned HTTP ${res.status}` });
     }
 
     const data = await res.json();
-    if (data.status_code !== 1) {
-      return respond({ error: data.error || 'Giant Bomb request failed' });
-    }
-
-    const results = ((data.results ?? []) as GiantBombGame[])
+    const results = ((data ?? []) as IGDBGame[])
       .map(toResult)
       .filter((item): item is VideogameResult => item !== null);
 

@@ -34,14 +34,14 @@ const SEARCH_DEBOUNCE_MS = 400;
 
 interface VideogameItem {
   id: string;
-  giantbomb_id: string;
+  igdb_id: string;
   title: string;
   year: string | null;
   cover_url: string | null;
 }
 
 interface SearchResult {
-  giantbomb_id: string;
+  igdb_id: string;
   title: string;
   year: string | null;
   cover_url: string | null;
@@ -103,7 +103,7 @@ export default function VideogamePosterPage(props: Props) {
   const load = useCallback(async () => {
     let q = supabase
       .from('videogame_items')
-      .select('id, giantbomb_id, title, year, cover_url');
+      .select('id, igdb_id, title, year, cover_url');
     let orderCol: string;
     if (mode === 'nine_club') {
       q = q.not('nine_club_added_at', 'is', null);
@@ -122,11 +122,11 @@ export default function VideogamePosterPage(props: Props) {
   }, [load]);
 
   const existingKeys = useMemo(
-    () => new Set(items.map((i) => i.giantbomb_id)),
+    () => new Set(items.map((i) => i.igdb_id)),
     [items],
   );
 
-  // Debounced Giant Bomb search
+  // Debounced IGDB search
   useEffect(() => {
     if (!searchOpen) return;
     const trimmed = query.trim();
@@ -167,7 +167,7 @@ export default function VideogamePosterPage(props: Props) {
   const addResult = async (result: SearchResult) => {
     const now = new Date().toISOString();
     const payload: Record<string, unknown> = {
-      giantbomb_id: result.giantbomb_id,
+      igdb_id: result.igdb_id,
       title: result.title,
       year: result.year,
       cover_url: result.cover_url,
@@ -179,9 +179,9 @@ export default function VideogamePosterPage(props: Props) {
       payload.added_at = now;
       payload.played_at = status === 'played' ? now : null;
     }
-    const { error } = await supabase.from('videogame_items').upsert(payload, { onConflict: 'giantbomb_id' });
+    const { error } = await supabase.from('videogame_items').upsert(payload, { onConflict: 'igdb_id' });
     if (!error) {
-      setAddedKeys((prev) => new Set(prev).add(result.giantbomb_id));
+      setAddedKeys((prev) => new Set(prev).add(result.igdb_id));
       load();
     }
   };
@@ -216,7 +216,7 @@ export default function VideogamePosterPage(props: Props) {
     setDetailLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke('videogame-details', {
-        body: { giantbomb_id: item.giantbomb_id },
+        body: { igdb_id: item.igdb_id },
       });
       if (!error && !data?.error) setDetailData(data as DetailData);
     } finally {
@@ -260,7 +260,7 @@ export default function VideogamePosterPage(props: Props) {
   );
 
   const renderResult = ({ item }: { item: SearchResult }) => {
-    const added = existingKeys.has(item.giantbomb_id) || addedKeys.has(item.giantbomb_id);
+    const added = existingKeys.has(item.igdb_id) || addedKeys.has(item.igdb_id);
     return (
       <Pressable style={[styles.resultWrap, { width: resultWidth }]} onPress={() => addResult(item)}>
         <View>
@@ -308,7 +308,7 @@ export default function VideogamePosterPage(props: Props) {
             onPress={openSearch}
             style={({ pressed }) => [styles.emptyBtn, { opacity: pressed ? 0.6 : 1 }]}
           >
-            <Text style={styles.emptyBtnText}>Search Giant Bomb</Text>
+            <Text style={styles.emptyBtnText}>Search IGDB</Text>
           </Pressable>
         </View>
       ) : (
@@ -360,7 +360,7 @@ export default function VideogamePosterPage(props: Props) {
               <FlatList
                 style={styles.resultsList}
                 data={results}
-                keyExtractor={(item) => item.giantbomb_id}
+                keyExtractor={(item) => item.igdb_id}
                 renderItem={renderResult}
                 numColumns={COLS}
                 columnWrapperStyle={{ gap: GAP }}
