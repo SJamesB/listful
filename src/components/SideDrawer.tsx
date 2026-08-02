@@ -26,6 +26,7 @@ interface Props {
   vaultPages: MenuItem[];
   cinemaPages: MenuItem[];
   libraryPages: MenuItem[];
+  videogamePages: MenuItem[];
 }
 
 export function SideDrawer({
@@ -37,6 +38,7 @@ export function SideDrawer({
   vaultPages,
   cinemaPages,
   libraryPages,
+  videogamePages,
 }: Props) {
   const insets = useSafeAreaInsets();
   const translateX = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
@@ -180,6 +182,25 @@ export function SideDrawer({
               onPress={() => onSelectPage('library', item.localIndex)}
             >
               <Text style={[styles.itemText, isActive('library', item) && styles.itemTextActive]}>
+                {item.label}
+              </Text>
+            </Pressable>
+          ))}
+
+          <View style={styles.divider} />
+
+          {/* Videogames */}
+          <Pressable style={styles.sectionHeader} onPress={() => toggle('videogames')} hitSlop={8}>
+            <Text style={styles.sectionLabel}>Games</Text>
+            <Text style={styles.chevron}>{expanded.has('videogames') ? '▾' : '▸'}</Text>
+          </Pressable>
+          {expanded.has('videogames') && videogamePages.map((item) => (
+            <Pressable
+              key={item.localIndex}
+              style={[styles.item, isActive('videogames', item) && styles.itemActive]}
+              onPress={() => onSelectPage('videogames', item.localIndex)}
+            >
+              <Text style={[styles.itemText, isActive('videogames', item) && styles.itemTextActive]}>
                 {item.label}
               </Text>
             </Pressable>

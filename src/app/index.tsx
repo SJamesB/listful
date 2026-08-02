@@ -18,6 +18,7 @@ import { LogPage } from '@/screens/LogPage';
 import NotesPage from '@/screens/NotesPage';
 import CinemaPosterPage, { type CinemaPosterPageProps } from '@/screens/CinemaPosterPage';
 import LibraryBookPage, { type LibraryBookPageProps } from '@/screens/LibraryBookPage';
+import VideogamePosterPage, { type VideogamePosterPageProps } from '@/screens/VideogamePosterPage';
 import EntertainmentPage from '@/screens/entertainment';
 import HabitsPage from '@/screens/habits';
 import TodoPage from '@/screens/todo';
@@ -42,11 +43,15 @@ const LIBRARY_BG = {
   layer1: ['#FDE9D0', '#F5D6A8', '#E8C08A', '#FDE9D0'] as const,
   layer2: ['#C08552', 'transparent', '#8B5A2B'] as const,
 };
+const VIDEOGAMES_BG = {
+  layer1: ['#C7D2FE', '#A5B4FC', '#818CF8', '#C7D2FE'] as const,
+  layer2: ['#818CF8', 'transparent', '#4F46E5'] as const,
+};
 
-export type Section = 'organise' | 'vault' | 'notes' | 'cinema' | 'library';
+export type Section = 'organise' | 'vault' | 'notes' | 'cinema' | 'library' | 'videogames';
 
 // Vertical scroll order between sections — matches the side drawer's order.
-const SECTION_ORDER: Section[] = ['organise', 'notes', 'vault', 'cinema', 'library'];
+const SECTION_ORDER: Section[] = ['organise', 'notes', 'vault', 'cinema', 'library', 'videogames'];
 
 const CINEMA_MENU_ITEMS = [
   { localIndex: 0, label: '🍿 Watchlist' },
@@ -57,6 +62,12 @@ const CINEMA_MENU_ITEMS = [
 const LIBRARY_MENU_ITEMS = [
   { localIndex: 0, label: '📖 To Read' },
   { localIndex: 1, label: '📚 Read' },
+  { localIndex: 2, label: '🏆 9-Club' },
+];
+
+const VIDEOGAMES_MENU_ITEMS = [
+  { localIndex: 0, label: '🎮 Backlog' },
+  { localIndex: 1, label: '🕹️ Played' },
   { localIndex: 2, label: '🏆 9-Club' },
 ];
 
@@ -80,7 +91,7 @@ export default function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [vaultConfigs, setVaultConfigs] = useState<CategoryConfig[]>([]);
   const [sectionIndex, setSectionIndex] = useState(0);
-  const [sectionPage, setSectionPage] = useState({ organise: 0, vault: 0, notes: 0, cinema: 0, library: 0 });
+  const [sectionPage, setSectionPage] = useState({ organise: 0, vault: 0, notes: 0, cinema: 0, library: 0, videogames: 0 });
   const [pagerHeight, setPagerHeight] = useState(0);
 
   const currentSection = SECTION_ORDER[sectionIndex];
@@ -90,6 +101,7 @@ export default function App() {
   const vaultRef = useRef<SectionPagerHandle>(null);
   const cinemaRef = useRef<SectionPagerHandle>(null);
   const libraryRef = useRef<SectionPagerHandle>(null);
+  const videogamesRef = useRef<SectionPagerHandle>(null);
 
   // Tracks whether each section's content is scrolled to its top/bottom edge,
   // so the vertical pager knows when it's safe to take over a vertical drag.
@@ -100,6 +112,7 @@ export default function App() {
     vault: { atTop: true, atBottom: true },
     cinema: { atTop: true, atBottom: true },
     library: { atTop: true, atBottom: true },
+    videogames: { atTop: true, atBottom: true },
   });
 
   const onEdgesChange = useMemo(() => {
@@ -111,6 +124,7 @@ export default function App() {
       vault: make('vault'),
       cinema: make('cinema'),
       library: make('library'),
+      videogames: make('videogames'),
     };
   }, []);
 
@@ -184,6 +198,27 @@ export default function App() {
     getLibraryComponent('favorites',{ title: '🏆 9-Club',  mode: 'favorites'                    }),
   ], [getLibraryComponent]);
 
+  // Cache videogame page components — keyed by page id, props are baked in at creation
+  const videogamesCompCache = useRef(new Map<string, SectionItem['Component']>());
+  const getVideogamesComponent = useCallback(
+    (id: string, props: VideogamePosterPageProps) => {
+      if (!videogamesCompCache.current.has(id)) {
+        const Comp = ({ onEdgesChange }: { onEdgesChange?: EdgesChangeHandler }) => (
+          <VideogamePosterPage {...props} onEdgesChange={onEdgesChange} />
+        );
+        videogamesCompCache.current.set(id, Comp);
+      }
+      return videogamesCompCache.current.get(id)!;
+    },
+    [],
+  );
+
+  const videogamesPageComponents = useMemo(() => [
+    getVideogamesComponent('backlog',  { title: '🎮 Backlog', mode: 'play',      status: 'backlog' }),
+    getVideogamesComponent('played',   { title: '🕹️ Played',  mode: 'play',      status: 'played'  }),
+    getVideogamesComponent('nineClub', { title: '🏆 9-Club',  mode: 'nine_club'                     }),
+  ], [getVideogamesComponent]);
+
   const organiseData = useMemo<SectionItem[]>(() => [
     { id: 'habits',        Component: HabitsPage },
     { id: 'todo',          Component: TodoPage },
@@ -205,11 +240,17 @@ export default function App() {
     [libraryPageComponents],
   );
 
+  const videogamesData = useMemo<SectionItem[]>(
+    () => videogamesPageComponents.map((Component, i) => ({ id: `videogames-${i}`, Component })),
+    [videogamesPageComponents],
+  );
+
   const bg =
-    currentSection === 'organise' ? ORGANISE_BG :
-    currentSection === 'vault'    ? VAULT_BG :
-    currentSection === 'cinema'   ? CINEMA_BG :
-    currentSection === 'library'  ? LIBRARY_BG :
+    currentSection === 'organise'   ? ORGANISE_BG :
+    currentSection === 'vault'      ? VAULT_BG :
+    currentSection === 'cinema'     ? CINEMA_BG :
+    currentSection === 'library'    ? LIBRARY_BG :
+    currentSection === 'videogames' ? VIDEOGAMES_BG :
     NOTES_BG;
 
   const vaultMenuItems = useMemo(
@@ -226,8 +267,9 @@ export default function App() {
     const ref =
       section === 'organise' ? organiseRef :
       section === 'vault'    ? vaultRef :
-      section === 'cinema'   ? cinemaRef :
-      section === 'library'  ? libraryRef :
+      section === 'cinema'     ? cinemaRef :
+      section === 'library'    ? libraryRef :
+      section === 'videogames' ? videogamesRef :
       null;
     ref?.current?.scrollToIndex(localIndex);
 
@@ -295,6 +337,20 @@ export default function App() {
         />
       ),
     },
+    {
+      key: 'videogames',
+      render: () => (
+        <SectionPager
+          ref={videogamesRef}
+          data={videogamesData}
+          width={width}
+          height={pagerHeight}
+          initialIndex={sectionPage.videogames}
+          onPageChange={(i) => setSectionPage((p) => ({ ...p, videogames: i }))}
+          onEdgesChange={onEdgesChange.videogames}
+        />
+      ),
+    },
   ];
 
   return (
@@ -338,6 +394,7 @@ export default function App() {
         vaultPages={vaultMenuItems}
         cinemaPages={CINEMA_MENU_ITEMS}
         libraryPages={LIBRARY_MENU_ITEMS}
+        videogamePages={VIDEOGAMES_MENU_ITEMS}
       />
     </View>
   );
