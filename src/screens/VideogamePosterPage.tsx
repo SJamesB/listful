@@ -34,14 +34,14 @@ const SEARCH_DEBOUNCE_MS = 400;
 
 interface VideogameItem {
   id: string;
-  rawg_id: number;
+  giantbomb_id: string;
   title: string;
   year: string | null;
   cover_url: string | null;
 }
 
 interface SearchResult {
-  rawg_id: number;
+  giantbomb_id: string;
   title: string;
   year: string | null;
   cover_url: string | null;
@@ -92,7 +92,7 @@ export default function VideogamePosterPage(props: Props) {
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [results, setResults] = useState<SearchResult[]>([]);
-  const [addedKeys, setAddedKeys] = useState<Set<number>>(new Set());
+  const [addedKeys, setAddedKeys] = useState<Set<string>>(new Set());
 
   const [actionItem, setActionItem] = useState<VideogameItem | null>(null);
 
@@ -103,7 +103,7 @@ export default function VideogamePosterPage(props: Props) {
   const load = useCallback(async () => {
     let q = supabase
       .from('videogame_items')
-      .select('id, rawg_id, title, year, cover_url');
+      .select('id, giantbomb_id, title, year, cover_url');
     let orderCol: string;
     if (mode === 'nine_club') {
       q = q.not('nine_club_added_at', 'is', null);
@@ -122,11 +122,11 @@ export default function VideogamePosterPage(props: Props) {
   }, [load]);
 
   const existingKeys = useMemo(
-    () => new Set(items.map((i) => i.rawg_id)),
+    () => new Set(items.map((i) => i.giantbomb_id)),
     [items],
   );
 
-  // Debounced RAWG search
+  // Debounced Giant Bomb search
   useEffect(() => {
     if (!searchOpen) return;
     const trimmed = query.trim();
@@ -167,7 +167,7 @@ export default function VideogamePosterPage(props: Props) {
   const addResult = async (result: SearchResult) => {
     const now = new Date().toISOString();
     const payload: Record<string, unknown> = {
-      rawg_id: result.rawg_id,
+      giantbomb_id: result.giantbomb_id,
       title: result.title,
       year: result.year,
       cover_url: result.cover_url,
@@ -179,9 +179,9 @@ export default function VideogamePosterPage(props: Props) {
       payload.added_at = now;
       payload.played_at = status === 'played' ? now : null;
     }
-    const { error } = await supabase.from('videogame_items').upsert(payload, { onConflict: 'rawg_id' });
+    const { error } = await supabase.from('videogame_items').upsert(payload, { onConflict: 'giantbomb_id' });
     if (!error) {
-      setAddedKeys((prev) => new Set(prev).add(result.rawg_id));
+      setAddedKeys((prev) => new Set(prev).add(result.giantbomb_id));
       load();
     }
   };
@@ -216,7 +216,7 @@ export default function VideogamePosterPage(props: Props) {
     setDetailLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke('videogame-details', {
-        body: { rawg_id: item.rawg_id },
+        body: { giantbomb_id: item.giantbomb_id },
       });
       if (!error && !data?.error) setDetailData(data as DetailData);
     } finally {
@@ -260,7 +260,7 @@ export default function VideogamePosterPage(props: Props) {
   );
 
   const renderResult = ({ item }: { item: SearchResult }) => {
-    const added = existingKeys.has(item.rawg_id) || addedKeys.has(item.rawg_id);
+    const added = existingKeys.has(item.giantbomb_id) || addedKeys.has(item.giantbomb_id);
     return (
       <Pressable style={[styles.resultWrap, { width: resultWidth }]} onPress={() => addResult(item)}>
         <View>
@@ -308,7 +308,7 @@ export default function VideogamePosterPage(props: Props) {
             onPress={openSearch}
             style={({ pressed }) => [styles.emptyBtn, { opacity: pressed ? 0.6 : 1 }]}
           >
-            <Text style={styles.emptyBtnText}>Search RAWG</Text>
+            <Text style={styles.emptyBtnText}>Search Giant Bomb</Text>
           </Pressable>
         </View>
       ) : (
@@ -360,7 +360,7 @@ export default function VideogamePosterPage(props: Props) {
               <FlatList
                 style={styles.resultsList}
                 data={results}
-                keyExtractor={(item) => String(item.rawg_id)}
+                keyExtractor={(item) => item.giantbomb_id}
                 renderItem={renderResult}
                 numColumns={COLS}
                 columnWrapperStyle={{ gap: GAP }}
