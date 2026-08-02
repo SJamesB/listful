@@ -3,7 +3,8 @@ const CORS = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const RAWG_BASE = 'https://api.rawg.io/api';
+const GIANTBOMB_BASE = 'https://www.giantbomb.com/api';
+const USER_AGENT = 'Listful/1.0 (contact: samboote93@gmail.com)';
 
 function respond(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -12,32 +13,48 @@ function respond(data: unknown, status = 200) {
   });
 }
 
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
 
   try {
-    const apiKey = Deno.env.get('RAWG_API_KEY');
-    if (!apiKey) return respond({ error: 'RAWG_API_KEY is not configured' });
+    const apiKey = Deno.env.get('GIANTBOMB_API_KEY');
+    if (!apiKey) return respond({ error: 'GIANTBOMB_API_KEY is not configured' });
 
     const body = await req.json();
-    const { rawg_id } = body as { rawg_id?: number };
-    if (!rawg_id) return respond({ error: 'rawg_id is required' });
+    const { giantbomb_id } = body as { giantbomb_id?: string };
+    if (!giantbomb_id) return respond({ error: 'giantbomb_id is required' });
 
-    const url = `${RAWG_BASE}/games/${rawg_id}?key=${apiKey}`;
-    const res = await fetch(url);
-    if (!res.ok) return respond({ error: `RAWG returned HTTP ${res.status}` });
+    const params = new URLSearchParams({
+      api_key: apiKey,
+      format: 'json',
+      field_list: 'name,deck,description,developers,publishers,genres,original_release_date',
+    });
+    const res = await fetch(`${GIANTBOMB_BASE}/game/${giantbomb_id}/?${params.toString()}`, {
+      headers: { 'User-Agent': USER_AGENT },
+    });
+    if (!res.ok) return respond({ error: `Giant Bomb returned HTTP ${res.status}` });
 
     const data = await res.json();
-    const developers: { name: string }[] = data.developers ?? [];
-    const publishers: { name: string }[] = data.publishers ?? [];
-    const genres: { name: string }[] = data.genres ?? [];
+    if (data.status_code !== 1) {
+      return respond({ error: data.error || 'Giant Bomb request failed' });
+    }
+
+    const result = data.results ?? {};
+    const developers: { name: string }[] = result.developers ?? [];
+    const publishers: { name: string }[] = result.publishers ?? [];
+    const genres: { name: string }[] = result.genres ?? [];
+    const overview = result.deck || (result.description ? stripHtml(result.description) : null);
 
     return respond({
-      overview: data.description_raw || null,
+      overview: overview || null,
       developer: developers.map((d) => d.name).join(', ') || null,
       publisher: publishers.map((p) => p.name).join(', ') || null,
       genres: genres.map((g) => g.name).join(', ') || null,
-      year: data.released ? String(data.released).slice(0, 4) : null,
+      year: result.original_release_date ? String(result.original_release_date).slice(0, 4) : null,
     });
   } catch (err) {
     return respond({ error: String(err) });
