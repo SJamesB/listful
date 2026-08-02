@@ -41,6 +41,14 @@ interface LibraryItem {
   genre: string | null;
 }
 
+type LibraryCategory = 'fiction' | 'non_fiction' | 'graphic_novel';
+
+const LIBRARY_CATEGORIES: { key: LibraryCategory; label: string }[] = [
+  { key: 'fiction', label: 'Fiction' },
+  { key: 'non_fiction', label: 'Non-Fiction' },
+  { key: 'graphic_novel', label: 'Graphic Novel' },
+];
+
 interface SearchResult {
   key: string;
   title: string;
@@ -75,10 +83,34 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+function FilterRow<T extends string>({ options, active, onSelect }: {
+  options: { key: T; label: string }[];
+  active: T;
+  onSelect: (key: T) => void;
+}) {
+  return (
+    <View style={styles.filterRow}>
+      {options.map((o) => (
+        <Pressable
+          key={o.key}
+          onPress={() => onSelect(o.key)}
+          style={[styles.filterChip, active === o.key && styles.filterChipActive]}
+        >
+          <Text style={[styles.filterChipText, active === o.key && styles.filterChipTextActive]}>
+            {o.label}
+          </Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
 export default function LibraryBookPage(props: Props) {
   const { title, mode, onEdgesChange } = props;
   const edgeScroll = useSectionEdgeScroll(onEdgesChange);
   const status = mode === 'read' ? props.status : undefined;
+  const [category, setCategory] = useState<LibraryCategory>('fiction');
+  const modalCategoryLabel = LIBRARY_CATEGORIES.find((c) => c.key === category)?.label;
 
   const { width, height } = useWindowDimensions();
   const coverWidth = (width - PADDING * 2 - GAP * (COLS - 1)) / COLS;
@@ -104,7 +136,8 @@ export default function LibraryBookPage(props: Props) {
   const load = useCallback(async () => {
     let q = supabase
       .from('library_items')
-      .select('id, title, author, year, cover_url, genre');
+      .select('id, title, author, year, cover_url, genre')
+      .eq('category', category);
     let orderCol: string;
     if (mode === 'favorites') {
       q = q.not('favorite_added_at', 'is', null);
@@ -116,7 +149,7 @@ export default function LibraryBookPage(props: Props) {
     const { data } = await q.order(orderCol, { ascending: false });
     if (data) setItems(data as LibraryItem[]);
     setLoading(false);
-  }, [mode, status]);
+  }, [mode, status, category]);
 
   useEffect(() => {
     load();
@@ -173,6 +206,7 @@ export default function LibraryBookPage(props: Props) {
       year: result.year,
       cover_url: result.cover_url,
       genre: result.genre,
+      category,
     };
     if (mode === 'favorites') {
       payload.favorite_added_at = now;
@@ -290,6 +324,8 @@ export default function LibraryBookPage(props: Props) {
         </Pressable>
       </View>
 
+      <FilterRow options={LIBRARY_CATEGORIES} active={category} onSelect={setCategory} />
+
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={C.accent} /></View>
       ) : items.length === 0 ? (
@@ -328,7 +364,9 @@ export default function LibraryBookPage(props: Props) {
         >
           <View style={[styles.modalCard, { maxHeight: height * 0.85 }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add to {title}</Text>
+              <Text style={styles.modalTitle}>
+                Add to {title}{modalCategoryLabel ? `: ${modalCategoryLabel}` : ''}
+              </Text>
               <Pressable onPress={() => setSearchOpen(false)} hitSlop={8}>
                 <Text style={styles.doneText}>Done</Text>
               </Pressable>
@@ -501,6 +539,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   addBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  filterRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: PADDING,
+    marginBottom: 12,
+  },
+  filterChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: 'rgba(26,22,38,0.06)',
+  },
+  filterChipActive: {
+    backgroundColor: C.accent,
+  },
+  filterChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: C.muted,
+  },
+  filterChipTextActive: {
+    color: '#fff',
+  },
   errorText: {
     fontSize: 12,
     color: C.danger,
