@@ -66,17 +66,12 @@ export type CinemaPosterPageProps =
 
 type Props = CinemaPosterPageProps & { onEdgesChange?: EdgesChangeHandler };
 
-type NineClubCategory = 'film' | 'tv' | 'animation';
+type CinemaCategory = 'film' | 'tv' | 'animation';
 
-const NINE_CLUB_CATEGORIES: { key: NineClubCategory; label: string }[] = [
+const CINEMA_CATEGORIES: { key: CinemaCategory; label: string }[] = [
   { key: 'film', label: 'Film' },
   { key: 'tv', label: 'TV' },
   { key: 'animation', label: 'Animation' },
-];
-
-const WATCHLIST_FILTERS: { key: 'movie' | 'tv'; label: string }[] = [
-  { key: 'movie', label: 'Film' },
-  { key: 'tv', label: 'TV' },
 ];
 
 const posterUri = (path: string | null) => (path ? `${POSTER_BASE}${path}` : null);
@@ -117,15 +112,8 @@ export default function CinemaPosterPage(props: Props) {
   const { title, mode, onEdgesChange } = props;
   const edgeScroll = useSectionEdgeScroll(onEdgesChange);
   const status = mode === 'watch' ? props.status : undefined;
-  const [category, setCategory] = useState<NineClubCategory>('film');
-  const [mediaTypeFilter, setMediaTypeFilter] = useState<'movie' | 'tv'>('movie');
-  const searchMediaType = mode === 'watch' ? mediaTypeFilter : undefined;
-  const modalCategoryLabel =
-    mode === 'nine_club'
-      ? NINE_CLUB_CATEGORIES.find((c) => c.key === category)?.label
-      : mode === 'watch'
-        ? WATCHLIST_FILTERS.find((f) => f.key === mediaTypeFilter)?.label
-        : undefined;
+  const [category, setCategory] = useState<CinemaCategory>('film');
+  const modalCategoryLabel = CINEMA_CATEGORIES.find((c) => c.key === category)?.label;
 
   const { width, height } = useWindowDimensions();
   const posterWidth = (width - PADDING * 2 - GAP * (COLS - 1)) / COLS;
@@ -160,13 +148,13 @@ export default function CinemaPosterPage(props: Props) {
       orderCol = 'nine_club_added_at';
     } else {
       q = q.eq('status', status!);
-      q = q.eq('media_type', mediaTypeFilter);
+      q = q.eq('watch_category', category);
       orderCol = status === 'watched' ? 'watched_at' : 'added_at';
     }
     const { data } = await q.order(orderCol, { ascending: false });
     if (data) setItems(data as CinemaItem[]);
     setLoading(false);
-  }, [mode, status, mediaTypeFilter, category]);
+  }, [mode, status, category]);
 
   useEffect(() => {
     load();
@@ -191,7 +179,7 @@ export default function CinemaPosterPage(props: Props) {
     const timeout = setTimeout(async () => {
       try {
         const { data, error } = await supabase.functions.invoke('tmdb-search', {
-          body: { query: trimmed, mediaType: searchMediaType },
+          body: { query: trimmed },
         });
         if (error) throw new Error(error.message);
         if (data?.error) throw new Error(data.error);
@@ -205,7 +193,7 @@ export default function CinemaPosterPage(props: Props) {
       }
     }, SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timeout);
-  }, [query, searchOpen, searchMediaType]);
+  }, [query, searchOpen]);
 
   const openSearch = () => {
     setQuery('');
@@ -228,6 +216,7 @@ export default function CinemaPosterPage(props: Props) {
       payload.nine_club_category = category;
       payload.nine_club_added_at = now;
     } else {
+      payload.watch_category = category;
       payload.status = status;
       payload.added_at = now;
       payload.watched_at = status === 'watched' ? now : null;
@@ -353,12 +342,7 @@ export default function CinemaPosterPage(props: Props) {
         </Pressable>
       </View>
 
-      {mode === 'nine_club' && (
-        <FilterRow options={NINE_CLUB_CATEGORIES} active={category} onSelect={setCategory} />
-      )}
-      {mode === 'watch' && (
-        <FilterRow options={WATCHLIST_FILTERS} active={mediaTypeFilter} onSelect={setMediaTypeFilter} />
-      )}
+      <FilterRow options={CINEMA_CATEGORIES} active={category} onSelect={setCategory} />
 
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={C.accent} /></View>
