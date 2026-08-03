@@ -15,6 +15,8 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
 import { supabase } from '@/lib/supabase';
@@ -34,13 +36,16 @@ const GAP = 6;
 const MODAL_PADDING = 28;
 const SEARCH_DEBOUNCE_MS = 400;
 
+type CinemaCategory = 'film' | 'tv' | 'animation';
+
 interface CinemaItem {
   id: string;
   tmdb_id: number;
-  media_type: 'movie' | 'tv';
+  category: CinemaCategory;
   title: string;
   year: string | null;
   poster_path: string | null;
+  sort_order: number | null;
 }
 
 interface SearchResult {
@@ -66,21 +71,23 @@ export type CinemaPosterPageProps =
 
 type Props = CinemaPosterPageProps & { onEdgesChange?: EdgesChangeHandler };
 
-type NineClubCategory = 'film' | 'tv' | 'animation';
-
-const NINE_CLUB_CATEGORIES: { key: NineClubCategory; label: string }[] = [
+const CATEGORIES: { key: CinemaCategory; label: string }[] = [
   { key: 'film', label: 'Film' },
   { key: 'tv', label: 'TV' },
   { key: 'animation', label: 'Animation' },
 ];
 
-const WATCHLIST_FILTERS: { key: 'movie' | 'tv'; label: string }[] = [
-  { key: 'movie', label: 'Film' },
-  { key: 'tv', label: 'TV' },
-];
+const CATEGORY_EMOJI: Record<CinemaCategory, string> = {
+  film: '🎬',
+  tv: '📺',
+  animation: '🎨',
+};
+
+// 'film' is a TMDB movie; 'tv' and 'animation' are both TMDB tv (animation is TV-only, e.g. anime).
+const tmdbTypeFor = (category: CinemaCategory): 'movie' | 'tv' => (category === 'film' ? 'movie' : 'tv');
 
 const posterUri = (path: string | null) => (path ? `${POSTER_BASE}${path}` : null);
-const resultKey = (tmdbId: number, mediaType: string) => `${tmdbId}-${mediaType}`;
+const resultKey = (tmdbId: number, category: string) => `${tmdbId}-${category}`;
 
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
@@ -117,15 +124,9 @@ export default function CinemaPosterPage(props: Props) {
   const { title, mode, onEdgesChange } = props;
   const edgeScroll = useSectionEdgeScroll(onEdgesChange);
   const status = mode === 'watch' ? props.status : undefined;
-  const [category, setCategory] = useState<NineClubCategory>('film');
-  const [mediaTypeFilter, setMediaTypeFilter] = useState<'movie' | 'tv'>('movie');
-  const searchMediaType = mode === 'watch' ? mediaTypeFilter : undefined;
-  const modalCategoryLabel =
-    mode === 'nine_club'
-      ? NINE_CLUB_CATEGORIES.find((c) => c.key === category)?.label
-      : mode === 'watch'
-        ? WATCHLIST_FILTERS.find((f) => f.key === mediaTypeFilter)?.label
-        : undefined;
+  const [category, setCategory] = useState<CinemaCategory>('film');
+  const searchMediaType = tmdbTypeFor(category);
+  const modalCategoryLabel = CATEGORIES.find((c) => c.key === category)?.label;
 
   const { width, height } = useWindowDimensions();
   const posterWidth = (width - PADDING * 2 - GAP * (COLS - 1)) / COLS;
@@ -150,30 +151,25 @@ export default function CinemaPosterPage(props: Props) {
   const [detailData, setDetailData] = useState<DetailData | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
+  const [reorderOpen, setReorderOpen] = useState(false);
+
   const load = useCallback(async () => {
     let q = supabase
       .from('cinema_items')
-      .select('id, tmdb_id, media_type, title, year, poster_path');
-    let orderCol: string;
-    if (mode === 'nine_club') {
-      q = q.eq('nine_club_category', category);
-      orderCol = 'nine_club_added_at';
-    } else {
-      q = q.eq('status', status!);
-      q = q.eq('media_type', mediaTypeFilter);
-      orderCol = status === 'watched' ? 'watched_at' : 'added_at';
-    }
-    const { data } = await q.order(orderCol, { ascending: false });
+      .select('id, tmdb_id, category, title, year, poster_path, sort_order')
+      .eq('category', category);
+    q = mode === 'nine_club' ? q.eq('nine_club', true) : q.eq('status', status!);
+    const { data } = await q.order('sort_order', { ascending: true, nullsFirst: false });
     if (data) setItems(data as CinemaItem[]);
     setLoading(false);
-  }, [mode, status, mediaTypeFilter, category]);
+  }, [mode, status, category]);
 
   useEffect(() => {
     load();
   }, [load]);
 
   const existingKeys = useMemo(
-    () => new Set(items.map((i) => resultKey(i.tmdb_id, i.media_type))),
+    () => new Set(items.map((i) => resultKey(i.tmdb_id, i.category))),
     [items],
   );
 
@@ -217,24 +213,25 @@ export default function CinemaPosterPage(props: Props) {
 
   const addResult = async (result: SearchResult) => {
     const now = new Date().toISOString();
+    const isNew = !existingKeys.has(resultKey(result.tmdb_id, category));
     const payload: Record<string, unknown> = {
       tmdb_id: result.tmdb_id,
-      media_type: result.media_type,
+      category,
       title: result.title,
       year: result.year,
       poster_path: result.poster_path,
     };
+    if (isNew) payload.sort_order = items.length;
     if (mode === 'nine_club') {
-      payload.nine_club_category = category;
+      payload.nine_club = true;
       payload.nine_club_added_at = now;
     } else {
       payload.status = status;
-      payload.added_at = now;
       payload.watched_at = status === 'watched' ? now : null;
     }
-    const { error } = await supabase.from('cinema_items').upsert(payload, { onConflict: 'tmdb_id,media_type' });
+    const { error } = await supabase.from('cinema_items').upsert(payload, { onConflict: 'tmdb_id,category' });
     if (!error) {
-      setAddedKeys((prev) => new Set(prev).add(resultKey(result.tmdb_id, result.media_type)));
+      setAddedKeys((prev) => new Set(prev).add(resultKey(result.tmdb_id, category)));
       load();
     }
   };
@@ -269,7 +266,7 @@ export default function CinemaPosterPage(props: Props) {
     setDetailLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke('tmdb-details', {
-        body: { tmdb_id: item.tmdb_id, media_type: item.media_type },
+        body: { tmdb_id: item.tmdb_id, media_type: tmdbTypeFor(item.category) },
       });
       if (!error && !data?.error) setDetailData(data as DetailData);
     } finally {
@@ -285,11 +282,47 @@ export default function CinemaPosterPage(props: Props) {
   const removeFromNineClub = async (item: CinemaItem) => {
     await supabase
       .from('cinema_items')
-      .update({ nine_club_category: null, nine_club_added_at: null })
+      .update({ nine_club: false, nine_club_added_at: null })
       .eq('id', item.id);
     setActionItem(null);
     load();
   };
+
+  const openReorder = useCallback(() => setReorderOpen(true), []);
+  const closeReorder = useCallback(() => setReorderOpen(false), []);
+
+  const onReorderDragEnd = useCallback(async ({ data }: { data: CinemaItem[] }) => {
+    setItems(data);
+    await Promise.all(
+      data.map((item, index) =>
+        supabase.from('cinema_items').update({ sort_order: index }).eq('id', item.id),
+      ),
+    );
+  }, []);
+
+  const renderReorderItem = useCallback(
+    ({ item, drag, isActive }: RenderItemParams<CinemaItem>) => (
+      <ScaleDecorator>
+        <Pressable
+          onLongPress={drag}
+          delayLongPress={300}
+          disabled={isActive}
+          style={[styles.reorderRow, isActive && styles.reorderRowActive]}
+        >
+          {item.poster_path ? (
+            <Image source={{ uri: posterUri(item.poster_path)! }} style={styles.reorderThumb} contentFit="cover" />
+          ) : (
+            <View style={[styles.reorderThumb, styles.posterFallback]}>
+              <Text style={{ fontSize: 14 }}>{CATEGORY_EMOJI[item.category]}</Text>
+            </View>
+          )}
+          <Text style={styles.reorderTitle} numberOfLines={1}>{item.title}</Text>
+          <Text style={styles.dragHandleText}>⠿</Text>
+        </Pressable>
+      </ScaleDecorator>
+    ),
+    [],
+  );
 
   const renderItem = ({ item }: { item: CinemaItem }) => (
     <Pressable
@@ -306,15 +339,15 @@ export default function CinemaPosterPage(props: Props) {
         />
       ) : (
         <View style={[styles.poster, styles.posterFallback, { width: posterWidth, height: posterHeight }]}>
-          <Text style={styles.fallbackEmoji}>{item.media_type === 'tv' ? '📺' : '🎬'}</Text>
+          <Text style={styles.fallbackEmoji}>{CATEGORY_EMOJI[item.category]}</Text>
         </View>
       )}
     </Pressable>
   );
 
   const renderResult = ({ item }: { item: SearchResult }) => {
-    const added = existingKeys.has(resultKey(item.tmdb_id, item.media_type)) ||
-      addedKeys.has(resultKey(item.tmdb_id, item.media_type));
+    const added = existingKeys.has(resultKey(item.tmdb_id, category)) ||
+      addedKeys.has(resultKey(item.tmdb_id, category));
     return (
       <Pressable style={[styles.resultWrap, { width: resultWidth }]} onPress={() => addResult(item)}>
         <View>
@@ -326,7 +359,7 @@ export default function CinemaPosterPage(props: Props) {
             />
           ) : (
             <View style={[styles.resultPoster, styles.posterFallback, { width: resultWidth, height: resultHeight }]}>
-              <Text style={styles.fallbackEmoji}>{item.media_type === 'tv' ? '📺' : '🎬'}</Text>
+              <Text style={styles.fallbackEmoji}>{CATEGORY_EMOJI[category]}</Text>
             </View>
           )}
           {added && (
@@ -345,20 +378,24 @@ export default function CinemaPosterPage(props: Props) {
     <View style={styles.root}>
       <View style={styles.header}>
         <Text style={styles.title}>{title}</Text>
-        <Pressable
-          onPress={openSearch}
-          style={({ pressed }) => [styles.addBtn, { opacity: pressed ? 0.6 : 1 }]}
-        >
-          <Text style={styles.addBtnText}>+ Add</Text>
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable
+            onPress={openReorder}
+            disabled={items.length < 2}
+            style={({ pressed }) => [styles.reorderBtn, { opacity: pressed || items.length < 2 ? 0.4 : 1 }]}
+          >
+            <Text style={styles.reorderBtnText}>Reorder</Text>
+          </Pressable>
+          <Pressable
+            onPress={openSearch}
+            style={({ pressed }) => [styles.addBtn, { opacity: pressed ? 0.6 : 1 }]}
+          >
+            <Text style={styles.addBtnText}>+ Add</Text>
+          </Pressable>
+        </View>
       </View>
 
-      {mode === 'nine_club' && (
-        <FilterRow options={NINE_CLUB_CATEGORIES} active={category} onSelect={setCategory} />
-      )}
-      {mode === 'watch' && (
-        <FilterRow options={WATCHLIST_FILTERS} active={mediaTypeFilter} onSelect={setMediaTypeFilter} />
-      )}
+      <FilterRow options={CATEGORIES} active={category} onSelect={setCategory} />
 
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={C.accent} /></View>
@@ -423,7 +460,7 @@ export default function CinemaPosterPage(props: Props) {
               <FlatList
                 style={styles.resultsList}
                 data={results}
-                keyExtractor={(item) => resultKey(item.tmdb_id, item.media_type)}
+                keyExtractor={(item) => resultKey(item.tmdb_id, category)}
                 renderItem={renderResult}
                 numColumns={COLS}
                 columnWrapperStyle={{ gap: GAP }}
@@ -477,12 +514,12 @@ export default function CinemaPosterPage(props: Props) {
               />
             ) : (
               <View style={[styles.detailPoster, styles.detailPosterFallback, { width: posterDetailWidth, height: posterDetailWidth * 1.5 }]}>
-                <Text style={{ fontSize: 48 }}>{detailItem?.media_type === 'tv' ? '📺' : '🎬'}</Text>
+                <Text style={{ fontSize: 48 }}>{detailItem ? CATEGORY_EMOJI[detailItem.category] : ''}</Text>
               </View>
             )}
             <Text style={styles.detailTitle}>{detailItem?.title}</Text>
             <Text style={styles.detailMetaText}>
-              {[detailItem?.year, detailItem?.media_type === 'tv' ? 'Series' : 'Film'].filter(Boolean).join(' · ')}
+              {[detailItem?.year, detailItem && CATEGORIES.find((c) => c.key === detailItem.category)?.label].filter(Boolean).join(' · ')}
             </Text>
             {detailLoading ? (
               <ActivityIndicator color="rgba(255,255,255,0.35)" style={{ marginTop: 20 }} />
@@ -492,14 +529,14 @@ export default function CinemaPosterPage(props: Props) {
                   <Text style={styles.detailOverview}>{detailData.overview}</Text>
                 ) : null}
                 <View style={styles.detailFields}>
-                  {detailItem?.media_type === 'movie' && detailData.director ? (
+                  {detailItem?.category === 'film' && detailData.director ? (
                     <DetailRow label="Director" value={detailData.director} />
                   ) : null}
-                  {detailItem?.media_type === 'tv' && detailData.created_by ? (
+                  {(detailItem?.category === 'tv' || detailItem?.category === 'animation') && detailData.created_by ? (
                     <DetailRow label="Created by" value={detailData.created_by} />
                   ) : null}
                   {detailData.studio ? (
-                    <DetailRow label={detailItem?.media_type === 'tv' ? 'Network' : 'Studio'} value={detailData.studio} />
+                    <DetailRow label={detailItem?.category === 'film' ? 'Studio' : 'Network'} value={detailData.studio} />
                   ) : null}
                   {detailData.composer ? (
                     <DetailRow label="Score" value={detailData.composer} />
@@ -560,6 +597,27 @@ export default function CinemaPosterPage(props: Props) {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <Modal visible={reorderOpen} animationType="slide" transparent onRequestClose={closeReorder}>
+        <GestureHandlerRootView style={styles.reorderBackdrop}>
+          <View style={styles.reorderSheet}>
+            <View style={styles.reorderHeader}>
+              <Text style={styles.reorderHeading}>Reorder</Text>
+              <Pressable onPress={closeReorder} hitSlop={12}>
+                <Text style={styles.reorderDone}>Done</Text>
+              </Pressable>
+            </View>
+            <DraggableFlatList
+              data={items}
+              keyExtractor={(item) => item.id}
+              renderItem={renderReorderItem}
+              onDragEnd={onReorderDragEnd}
+              activationDistance={5}
+              contentContainerStyle={styles.reorderList}
+            />
+          </View>
+        </GestureHandlerRootView>
+      </Modal>
     </View>
   );
 }
@@ -580,6 +638,18 @@ const styles = StyleSheet.create({
     color: C.text,
     letterSpacing: -0.3,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  reorderBtn: {
+    paddingHorizontal: 4,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reorderBtnText: { color: C.accent, fontSize: 13, fontWeight: '600' },
   addBtn: {
     backgroundColor: C.accent,
     paddingHorizontal: 14,
@@ -819,5 +889,69 @@ const styles = StyleSheet.create({
   },
   actionBtnDanger: {
     color: C.danger,
+  },
+  // Reorder modal
+  reorderBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  reorderSheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '70%',
+    paddingBottom: 24,
+  },
+  reorderHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(26,22,38,0.08)',
+  },
+  reorderHeading: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: C.text,
+  },
+  reorderDone: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: C.accent,
+  },
+  reorderList: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+  },
+  reorderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    gap: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(26,22,38,0.08)',
+  },
+  reorderRowActive: {
+    opacity: 0.85,
+  },
+  reorderThumb: {
+    width: 32,
+    height: 48,
+    borderRadius: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reorderTitle: {
+    flex: 1,
+    fontSize: 15,
+    color: C.text,
+    fontWeight: '500',
+  },
+  dragHandleText: {
+    fontSize: 18,
+    color: C.muted,
   },
 });

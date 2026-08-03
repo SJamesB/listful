@@ -15,6 +15,8 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
 import { supabase } from '@/lib/supabase';
@@ -32,13 +34,16 @@ const GAP = 6;
 const MODAL_PADDING = 28;
 const SEARCH_DEBOUNCE_MS = 400;
 
+type LibraryCategory = 'fiction' | 'non_fiction' | 'graphic_novel';
+
 interface LibraryItem {
   id: string;
   title: string;
   author: string | null;
   year: string | null;
   cover_url: string | null;
-  genre: string | null;
+  category: LibraryCategory;
+  sort_order: number | null;
 }
 
 interface SearchResult {
@@ -47,7 +52,6 @@ interface SearchResult {
   author: string | null;
   year: string | null;
   cover_url: string | null;
-  genre: string | null;
 }
 
 export type LibraryBookPageProps =
@@ -55,6 +59,12 @@ export type LibraryBookPageProps =
   | { title: string; mode: 'favorites' };
 
 type Props = LibraryBookPageProps & { onEdgesChange?: EdgesChangeHandler };
+
+const CATEGORIES: { key: LibraryCategory; label: string }[] = [
+  { key: 'fiction', label: 'Fiction' },
+  { key: 'non_fiction', label: 'Non-fiction' },
+  { key: 'graphic_novel', label: 'Graphic Novel' },
+];
 
 const matchKey = (title: string, author: string | null) =>
   `${title.trim().toLowerCase()}|${(author ?? '').trim().toLowerCase()}`;
@@ -75,10 +85,33 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+function FilterRow<T extends string>({ options, active, onSelect }: {
+  options: { key: T; label: string }[];
+  active: T;
+  onSelect: (key: T) => void;
+}) {
+  return (
+    <View style={styles.filterRow}>
+      {options.map((o) => (
+        <Pressable
+          key={o.key}
+          onPress={() => onSelect(o.key)}
+          style={[styles.filterChip, active === o.key && styles.filterChipActive]}
+        >
+          <Text style={[styles.filterChipText, active === o.key && styles.filterChipTextActive]}>
+            {o.label}
+          </Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
 export default function LibraryBookPage(props: Props) {
   const { title, mode, onEdgesChange } = props;
   const edgeScroll = useSectionEdgeScroll(onEdgesChange);
   const status = mode === 'read' ? props.status : undefined;
+  const [category, setCategory] = useState<LibraryCategory>('fiction');
 
   const { width, height } = useWindowDimensions();
   const coverWidth = (width - PADDING * 2 - GAP * (COLS - 1)) / COLS;
@@ -101,22 +134,18 @@ export default function LibraryBookPage(props: Props) {
 
   const [detailItem, setDetailItem] = useState<LibraryItem | null>(null);
 
+  const [reorderOpen, setReorderOpen] = useState(false);
+
   const load = useCallback(async () => {
     let q = supabase
       .from('library_items')
-      .select('id, title, author, year, cover_url, genre');
-    let orderCol: string;
-    if (mode === 'favorites') {
-      q = q.not('favorite_added_at', 'is', null);
-      orderCol = 'favorite_added_at';
-    } else {
-      q = q.eq('status', status!);
-      orderCol = status === 'read' ? 'read_at' : 'added_at';
-    }
-    const { data } = await q.order(orderCol, { ascending: false });
+      .select('id, title, author, year, cover_url, category, sort_order')
+      .eq('category', category);
+    q = mode === 'favorites' ? q.eq('favorite', true) : q.eq('status', status!);
+    const { data } = await q.order('sort_order', { ascending: true, nullsFirst: false });
     if (data) setItems(data as LibraryItem[]);
     setLoading(false);
-  }, [mode, status]);
+  }, [mode, status, category]);
 
   useEffect(() => {
     load();
@@ -172,13 +201,14 @@ export default function LibraryBookPage(props: Props) {
       author: result.author,
       year: result.year,
       cover_url: result.cover_url,
-      genre: result.genre,
+      category,
+      sort_order: items.length,
     };
     if (mode === 'favorites') {
+      payload.favorite = true;
       payload.favorite_added_at = now;
     } else {
       payload.status = status;
-      payload.added_at = now;
       payload.read_at = status === 'read' ? now : null;
     }
     const { error } = await supabase.from('library_items').insert(payload);
@@ -215,7 +245,7 @@ export default function LibraryBookPage(props: Props) {
   const removeFromFavorites = async (item: LibraryItem) => {
     await supabase
       .from('library_items')
-      .update({ favorite_added_at: null })
+      .update({ favorite: false, favorite_added_at: null })
       .eq('id', item.id);
     setActionItem(null);
     load();
@@ -228,6 +258,42 @@ export default function LibraryBookPage(props: Props) {
   const closeDetail = useCallback(() => {
     setDetailItem(null);
   }, []);
+
+  const openReorder = useCallback(() => setReorderOpen(true), []);
+  const closeReorder = useCallback(() => setReorderOpen(false), []);
+
+  const onReorderDragEnd = useCallback(async ({ data }: { data: LibraryItem[] }) => {
+    setItems(data);
+    await Promise.all(
+      data.map((item, index) =>
+        supabase.from('library_items').update({ sort_order: index }).eq('id', item.id),
+      ),
+    );
+  }, []);
+
+  const renderReorderItem = useCallback(
+    ({ item, drag, isActive }: RenderItemParams<LibraryItem>) => (
+      <ScaleDecorator>
+        <Pressable
+          onLongPress={drag}
+          delayLongPress={300}
+          disabled={isActive}
+          style={[styles.reorderRow, isActive && styles.reorderRowActive]}
+        >
+          {item.cover_url ? (
+            <Image source={{ uri: coverUri(item.cover_url)! }} style={styles.reorderThumb} contentFit="cover" />
+          ) : (
+            <View style={[styles.reorderThumb, styles.coverFallback]}>
+              <Text style={{ fontSize: 14 }}>📖</Text>
+            </View>
+          )}
+          <Text style={styles.reorderTitle} numberOfLines={1}>{item.title}</Text>
+          <Text style={styles.dragHandleText}>⠿</Text>
+        </Pressable>
+      </ScaleDecorator>
+    ),
+    [],
+  );
 
   const renderItem = ({ item }: { item: LibraryItem }) => (
     <Pressable
@@ -282,13 +348,24 @@ export default function LibraryBookPage(props: Props) {
     <View style={styles.root}>
       <View style={styles.header}>
         <Text style={styles.title}>{title}</Text>
-        <Pressable
-          onPress={openSearch}
-          style={({ pressed }) => [styles.addBtn, { opacity: pressed ? 0.6 : 1 }]}
-        >
-          <Text style={styles.addBtnText}>+ Add</Text>
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable
+            onPress={openReorder}
+            disabled={items.length < 2}
+            style={({ pressed }) => [styles.reorderBtn, { opacity: pressed || items.length < 2 ? 0.4 : 1 }]}
+          >
+            <Text style={styles.reorderBtnText}>Reorder</Text>
+          </Pressable>
+          <Pressable
+            onPress={openSearch}
+            style={({ pressed }) => [styles.addBtn, { opacity: pressed ? 0.6 : 1 }]}
+          >
+            <Text style={styles.addBtnText}>+ Add</Text>
+          </Pressable>
+        </View>
       </View>
+
+      <FilterRow options={CATEGORIES} active={category} onSelect={setCategory} />
 
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={C.accent} /></View>
@@ -328,7 +405,9 @@ export default function LibraryBookPage(props: Props) {
         >
           <View style={[styles.modalCard, { maxHeight: height * 0.85 }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add to {title}</Text>
+              <Text style={styles.modalTitle}>
+                Add to {title}: {CATEGORIES.find((c) => c.key === category)?.label}
+              </Text>
               <Pressable onPress={() => setSearchOpen(false)} hitSlop={8}>
                 <Text style={styles.doneText}>Done</Text>
               </Pressable>
@@ -412,11 +491,9 @@ export default function LibraryBookPage(props: Props) {
             <Text style={styles.detailMetaText}>
               {[detailItem?.author, detailItem?.year].filter(Boolean).join(' · ')}
             </Text>
-            {detailItem?.genre ? (
-              <View style={styles.detailFields}>
-                <DetailRow label="Genre" value={detailItem.genre} />
-              </View>
-            ) : null}
+            <View style={styles.detailFields}>
+              <DetailRow label="Category" value={CATEGORIES.find((c) => c.key === detailItem?.category)?.label ?? ''} />
+            </View>
           </ScrollView>
         </View>
       </Modal>
@@ -470,6 +547,27 @@ export default function LibraryBookPage(props: Props) {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <Modal visible={reorderOpen} animationType="slide" transparent onRequestClose={closeReorder}>
+        <GestureHandlerRootView style={styles.reorderBackdrop}>
+          <View style={styles.reorderSheet}>
+            <View style={styles.reorderHeader}>
+              <Text style={styles.reorderHeading}>Reorder</Text>
+              <Pressable onPress={closeReorder} hitSlop={12}>
+                <Text style={styles.reorderDone}>Done</Text>
+              </Pressable>
+            </View>
+            <DraggableFlatList
+              data={items}
+              keyExtractor={(item) => item.id}
+              renderItem={renderReorderItem}
+              onDragEnd={onReorderDragEnd}
+              activationDistance={5}
+              contentContainerStyle={styles.reorderList}
+            />
+          </View>
+        </GestureHandlerRootView>
+      </Modal>
     </View>
   );
 }
@@ -490,6 +588,18 @@ const styles = StyleSheet.create({
     color: C.text,
     letterSpacing: -0.3,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  reorderBtn: {
+    paddingHorizontal: 4,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reorderBtnText: { color: C.accent, fontSize: 13, fontWeight: '600' },
   addBtn: {
     backgroundColor: C.accent,
     paddingHorizontal: 14,
@@ -501,6 +611,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   addBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  filterRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: PADDING,
+    marginBottom: 12,
+  },
+  filterChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: 'rgba(26,22,38,0.06)',
+  },
+  filterChipActive: {
+    backgroundColor: C.accent,
+  },
+  filterChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: C.muted,
+  },
+  filterChipTextActive: {
+    color: '#fff',
+  },
   errorText: {
     fontSize: 12,
     color: C.danger,
@@ -706,5 +839,69 @@ const styles = StyleSheet.create({
   },
   actionBtnDanger: {
     color: C.danger,
+  },
+  // Reorder modal
+  reorderBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  reorderSheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '70%',
+    paddingBottom: 24,
+  },
+  reorderHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(26,22,38,0.08)',
+  },
+  reorderHeading: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: C.text,
+  },
+  reorderDone: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: C.accent,
+  },
+  reorderList: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+  },
+  reorderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    gap: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(26,22,38,0.08)',
+  },
+  reorderRowActive: {
+    opacity: 0.85,
+  },
+  reorderThumb: {
+    width: 32,
+    height: 48,
+    borderRadius: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reorderTitle: {
+    flex: 1,
+    fontSize: 15,
+    color: C.text,
+    fontWeight: '500',
+  },
+  dragHandleText: {
+    fontSize: 18,
+    color: C.muted,
   },
 });

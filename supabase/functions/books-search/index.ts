@@ -12,7 +12,6 @@ interface LibraryResult {
   author: string | null;
   year: string | null;
   cover_url: string | null;
-  genre: string | null;
 }
 
 interface GoogleVolume {
@@ -22,7 +21,6 @@ interface GoogleVolume {
     authors?: string[];
     publishedDate?: string;
     imageLinks?: { thumbnail?: string; smallThumbnail?: string };
-    categories?: string[];
   };
 }
 
@@ -32,7 +30,6 @@ interface OpenLibraryDoc {
   author_name?: string[];
   first_publish_year?: number;
   cover_i?: number;
-  subject?: string[];
 }
 
 function respond(data: unknown, status = 200) {
@@ -52,7 +49,6 @@ function fromGoogle(volume: GoogleVolume): LibraryResult | null {
     author: info.authors?.join(', ') ?? null,
     year: info.publishedDate ? info.publishedDate.slice(0, 4) : null,
     cover_url: thumbnail ? thumbnail.replace(/^http:/, 'https:') : null,
-    genre: info.categories?.length ? info.categories.slice(0, 2).join(', ') : null,
   };
 }
 
@@ -64,7 +60,6 @@ function fromOpenLibrary(doc: OpenLibraryDoc): LibraryResult | null {
     author: doc.author_name?.join(', ') ?? null,
     year: doc.first_publish_year ? String(doc.first_publish_year) : null,
     cover_url: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : null,
-    genre: doc.subject?.length ? doc.subject.slice(0, 2).join(', ') : null,
   };
 }
 
@@ -107,9 +102,7 @@ function merge(sources: LibraryResult[][]): LibraryResult[] {
       if (!existing) {
         byKey.set(dKey, result);
       } else if (!existing.cover_url && result.cover_url) {
-        byKey.set(dKey, { ...existing, cover_url: result.cover_url, genre: existing.genre ?? result.genre });
-      } else if (!existing.genre && result.genre) {
-        existing.genre = result.genre;
+        byKey.set(dKey, { ...existing, cover_url: result.cover_url });
       }
     }
   }
