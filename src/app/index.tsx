@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PageBackground } from '@/components/PageBackground';
@@ -13,20 +13,15 @@ import {
 } from '@/components/VerticalSectionPager';
 import type { EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
 import { makeConfig, type CategoryConfig } from '@/lib/logCategories';
-import { completeWebAuth } from '@/lib/spotify';
 import { supabase } from '@/lib/supabase';
 import { LogPage } from '@/screens/LogPage';
 import NotesPage, { type Note, type NotesPageHandle } from '@/screens/NotesPage';
 import CinemaPosterPage, { type CinemaPosterPageProps } from '@/screens/CinemaPosterPage';
 import LibraryBookPage, { type LibraryBookPageProps } from '@/screens/LibraryBookPage';
-import SpotifyPage from '@/screens/SpotifyPage';
-import SpotifyPlaylistPage from '@/screens/SpotifyPlaylistPage';
+import VideogamePosterPage, { type VideogamePosterPageProps } from '@/screens/VideogamePosterPage';
 import EntertainmentPage from '@/screens/entertainment';
 import HabitsPage from '@/screens/habits';
 import TodoPage from '@/screens/todo';
-
-// One fixed spotify page: main management view
-const SPOTIFY_FIXED = 1;
 
 const ORGANISE_BG = {
   layer1: ['#FBBFE8', '#C3B8FF', '#B8EEE4', '#FBBFE8'] as const,
@@ -48,15 +43,15 @@ const LIBRARY_BG = {
   layer1: ['#FDE9D0', '#F5D6A8', '#E8C08A', '#FDE9D0'] as const,
   layer2: ['#C08552', 'transparent', '#8B5A2B'] as const,
 };
-const SPOTIFY_BG = {
-  layer1: ['#D1FAE5', '#A7F3D0', '#6EE7B7', '#D1FAE5'] as const,
-  layer2: ['#34D399', 'transparent', '#059669'] as const,
+const VIDEOGAMES_BG = {
+  layer1: ['#C7D2FE', '#A5B4FC', '#818CF8', '#C7D2FE'] as const,
+  layer2: ['#818CF8', 'transparent', '#4F46E5'] as const,
 };
 
-export type Section = 'organise' | 'vault' | 'notes' | 'cinema' | 'library' | 'spotify';
+export type Section = 'organise' | 'vault' | 'notes' | 'cinema' | 'library' | 'videogames';
 
 // Vertical scroll order between sections — matches the side drawer's order.
-const SECTION_ORDER: Section[] = ['organise', 'notes', 'vault', 'cinema', 'library', 'spotify'];
+const SECTION_ORDER: Section[] = ['organise', 'notes', 'vault', 'cinema', 'library', 'videogames'];
 
 const CINEMA_MENU_ITEMS = [
   { localIndex: 0, label: '🍿 Watchlist' },
@@ -70,10 +65,11 @@ const LIBRARY_MENU_ITEMS = [
   { localIndex: 2, label: '🏆 9-Club' },
 ];
 
-interface SpotifyPinnedPlaylist {
-  spotifyId: string;
-  name: string;
-}
+const VIDEOGAMES_MENU_ITEMS = [
+  { localIndex: 0, label: '🎮 Backlog' },
+  { localIndex: 1, label: '🕹️ Played' },
+  { localIndex: 2, label: '🏆 9-Club' },
+];
 
 function HamburgerIcon() {
   return (
@@ -94,10 +90,9 @@ export default function App() {
   const insets = useSafeAreaInsets();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [vaultConfigs, setVaultConfigs] = useState<CategoryConfig[]>([]);
-  const [spotifyPlaylists, setSpotifyPlaylists] = useState<SpotifyPinnedPlaylist[]>([]);
   const [notesList, setNotesList] = useState<Note[]>([]);
   const [sectionIndex, setSectionIndex] = useState(0);
-  const [sectionPage, setSectionPage] = useState({ organise: 0, vault: 0, notes: 0, cinema: 0, library: 0, spotify: 0 });
+  const [sectionPage, setSectionPage] = useState({ organise: 0, vault: 0, notes: 0, cinema: 0, library: 0, videogames: 0 });
   const [pagerHeight, setPagerHeight] = useState(0);
 
   const currentSection = SECTION_ORDER[sectionIndex];
@@ -108,7 +103,7 @@ export default function App() {
   const vaultRef = useRef<SectionPagerHandle>(null);
   const cinemaRef = useRef<SectionPagerHandle>(null);
   const libraryRef = useRef<SectionPagerHandle>(null);
-  const spotifyRef = useRef<SectionPagerHandle>(null);
+  const videogamesRef = useRef<SectionPagerHandle>(null);
 
   // Tracks whether each section's content is scrolled to its top/bottom edge,
   // so the vertical pager knows when it's safe to take over a vertical drag.
@@ -119,7 +114,7 @@ export default function App() {
     vault: { atTop: true, atBottom: true },
     cinema: { atTop: true, atBottom: true },
     library: { atTop: true, atBottom: true },
-    spotify: { atTop: true, atBottom: true },
+    videogames: { atTop: true, atBottom: true },
   });
 
   const onEdgesChange = useMemo(() => {
@@ -131,37 +126,9 @@ export default function App() {
       vault: make('vault'),
       cinema: make('cinema'),
       library: make('library'),
-      spotify: make('spotify'),
+      videogames: make('videogames'),
     };
   }, []);
-
-  // Handle Spotify OAuth redirect back to the web app (?code=...)
-  useEffect(() => {
-    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    const code = params.get('code');
-    if (!code) return;
-    window.history.replaceState({}, '', window.location.pathname);
-    completeWebAuth(code)
-      .then(() => setSectionIndex(SECTION_ORDER.indexOf('spotify')))
-      .catch((err) => console.warn('Spotify web auth failed:', err));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const loadSpotifyPlaylists = useCallback(() => {
-    supabase
-      .from('spotify_playlists')
-      .select('spotify_id, name, page_order')
-      .eq('pinned', true)
-      .order('page_order', { ascending: true })
-      .then(({ data }) => {
-        if (!data) return;
-        setSpotifyPlaylists(data.map((r) => ({ spotifyId: r.spotify_id, name: r.name })));
-      });
-  }, []);
-
-  // Stable ref so SpotifyPage's cached closure always calls the latest version
-  const loadSpotifyRef = useRef(loadSpotifyPlaylists);
-  loadSpotifyRef.current = loadSpotifyPlaylists;
 
   useEffect(() => {
     supabase
@@ -172,9 +139,7 @@ export default function App() {
         const keys = [...new Set(data.map((r) => r.category as string))].sort();
         setVaultConfigs(keys.map(makeConfig));
       });
-
-    loadSpotifyPlaylists();
-  }, [loadSpotifyPlaylists]);
+  }, []);
 
   // Cache vault page components by category key to prevent remounts
   const vaultCompCache = useRef(new Map<string, SectionItem['Component']>());
@@ -223,35 +188,6 @@ export default function App() {
     [],
   );
 
-  // Cache spotify page components
-  const spotifyCompCache = useRef(new Map<string, SectionItem['Component']>());
-  const getSpotifyComponent = useCallback(
-    (id: string, factory: () => SectionItem['Component']) => {
-      if (!spotifyCompCache.current.has(id)) {
-        spotifyCompCache.current.set(id, factory());
-      }
-      return spotifyCompCache.current.get(id)!;
-    },
-    [],
-  );
-
-  const spotifyPageComponents = useMemo(() => [
-    getSpotifyComponent('spotify-main', () => {
-      const Comp = ({ onEdgesChange }: { onEdgesChange?: EdgesChangeHandler }) => (
-        <SpotifyPage onPinsChanged={() => loadSpotifyRef.current()} onEdgesChange={onEdgesChange} />
-      );
-      return Comp;
-    }),
-    ...spotifyPlaylists.map((p) =>
-      getSpotifyComponent(`spotify-${p.spotifyId}`, () => {
-        const Comp = ({ onEdgesChange }: { onEdgesChange?: EdgesChangeHandler }) => (
-          <SpotifyPlaylistPage title={p.name} spotifyId={p.spotifyId} onEdgesChange={onEdgesChange} />
-        );
-        return Comp;
-      }),
-    ),
-  ], [spotifyPlaylists, getSpotifyComponent]);
-
   const cinemaPageComponents = useMemo(() => [
     getCinemaComponent('watchlist', { title: '🍿 Watchlist', mode: 'watch',     status: 'to_watch' }),
     getCinemaComponent('watched',   { title: '🎥 Watched',    mode: 'watch',     status: 'watched'  }),
@@ -263,6 +199,27 @@ export default function App() {
     getLibraryComponent('read',     { title: '📚 Read',     mode: 'read',      status: 'read'    }),
     getLibraryComponent('favorites',{ title: '🏆 9-Club',  mode: 'favorites'                    }),
   ], [getLibraryComponent]);
+
+  // Cache videogame page components — keyed by page id, props are baked in at creation
+  const videogamesCompCache = useRef(new Map<string, SectionItem['Component']>());
+  const getVideogamesComponent = useCallback(
+    (id: string, props: VideogamePosterPageProps) => {
+      if (!videogamesCompCache.current.has(id)) {
+        const Comp = ({ onEdgesChange }: { onEdgesChange?: EdgesChangeHandler }) => (
+          <VideogamePosterPage {...props} onEdgesChange={onEdgesChange} />
+        );
+        videogamesCompCache.current.set(id, Comp);
+      }
+      return videogamesCompCache.current.get(id)!;
+    },
+    [],
+  );
+
+  const videogamesPageComponents = useMemo(() => [
+    getVideogamesComponent('backlog',  { title: '🎮 Backlog', mode: 'play',      status: 'to_play' }),
+    getVideogamesComponent('played',   { title: '🕹️ Played',  mode: 'play',      status: 'play'    }),
+    getVideogamesComponent('nineClub', { title: '🏆 9-Club',  mode: 'nine_club'                     }),
+  ], [getVideogamesComponent]);
 
   const organiseData = useMemo<SectionItem[]>(() => [
     { id: 'habits',        Component: HabitsPage },
@@ -285,17 +242,17 @@ export default function App() {
     [libraryPageComponents],
   );
 
-  const spotifyData = useMemo<SectionItem[]>(
-    () => spotifyPageComponents.map((Component, i) => ({ id: `spotify-${i}`, Component })),
-    [spotifyPageComponents],
+  const videogamesData = useMemo<SectionItem[]>(
+    () => videogamesPageComponents.map((Component, i) => ({ id: `videogames-${i}`, Component })),
+    [videogamesPageComponents],
   );
 
   const bg =
-    currentSection === 'organise' ? ORGANISE_BG :
-    currentSection === 'vault'    ? VAULT_BG :
-    currentSection === 'cinema'   ? CINEMA_BG :
-    currentSection === 'library'  ? LIBRARY_BG :
-    currentSection === 'spotify'  ? SPOTIFY_BG :
+    currentSection === 'organise'   ? ORGANISE_BG :
+    currentSection === 'vault'      ? VAULT_BG :
+    currentSection === 'cinema'     ? CINEMA_BG :
+    currentSection === 'library'    ? LIBRARY_BG :
+    currentSection === 'videogames' ? VIDEOGAMES_BG :
     NOTES_BG;
 
   const vaultMenuItems = useMemo(
@@ -308,14 +265,6 @@ export default function App() {
     [notesList],
   );
 
-  const spotifyMenuItems = useMemo(() => [
-    { localIndex: 0, label: '🎵 Music' },
-    ...spotifyPlaylists.map((p, i) => ({
-      localIndex: SPOTIFY_FIXED + i,
-      label: p.name,
-    })),
-  ], [spotifyPlaylists]);
-
   const navigateTo = useCallback((section: Section, localIndex: number) => {
     if (section !== currentSection) {
       verticalRef.current?.jumpTo(SECTION_ORDER.indexOf(section));
@@ -326,9 +275,9 @@ export default function App() {
       section === 'organise' ? organiseRef :
       section === 'notes'    ? notesRef :
       section === 'vault'    ? vaultRef :
-      section === 'cinema'   ? cinemaRef :
-      section === 'library'  ? libraryRef :
-      section === 'spotify'  ? spotifyRef :
+      section === 'cinema'     ? cinemaRef :
+      section === 'library'    ? libraryRef :
+      section === 'videogames' ? videogamesRef :
       null;
     ref?.current?.scrollToIndex(localIndex);
 
@@ -403,16 +352,16 @@ export default function App() {
       ),
     },
     {
-      key: 'spotify',
+      key: 'videogames',
       render: () => (
         <SectionPager
-          ref={spotifyRef}
-          data={spotifyData}
+          ref={videogamesRef}
+          data={videogamesData}
           width={width}
           height={pagerHeight}
-          initialIndex={sectionPage.spotify}
-          onPageChange={(i) => setSectionPage((p) => ({ ...p, spotify: i }))}
-          onEdgesChange={onEdgesChange.spotify}
+          initialIndex={sectionPage.videogames}
+          onPageChange={(i) => setSectionPage((p) => ({ ...p, videogames: i }))}
+          onEdgesChange={onEdgesChange.videogames}
         />
       ),
     },
@@ -460,7 +409,7 @@ export default function App() {
         vaultPages={vaultMenuItems}
         cinemaPages={CINEMA_MENU_ITEMS}
         libraryPages={LIBRARY_MENU_ITEMS}
-        spotifyPages={spotifyMenuItems}
+        videogamePages={VIDEOGAMES_MENU_ITEMS}
       />
     </View>
   );
