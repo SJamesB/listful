@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -45,7 +45,7 @@ function noteColor(id: string): string {
 
 interface ChecklistItem { id: string; text: string; done: boolean; }
 
-interface Note {
+export interface Note {
   id: string;
   title: string;
   content: string;
@@ -107,6 +107,7 @@ function NoteCard({
   const [editText, setEditText] = useState('');
   const [addingItem, setAddingItem] = useState(false);
   const [newItemText, setNewItemText] = useState('');
+  const [showCompleted, setShowCompleted] = useState(false);
 
   const { type: noteType, items } = useMemo(() => parseContent(note.content), [note.content]);
   const isChecklist = noteType === 'checklist';
@@ -212,8 +213,16 @@ function NoteCard({
 
             {checked.length > 0 && (
               <>
-                <View style={styles.checkedDivider} />
-                {checked.map(item => (
+                <Pressable
+                  style={styles.completedHeader}
+                  onPress={() => setShowCompleted((v) => !v)}
+                  hitSlop={8}
+                >
+                  <Text style={styles.completedHeaderText}>
+                    {showCompleted ? '▾' : '▸'} Completed ({checked.length})
+                  </Text>
+                </Pressable>
+                {showCompleted && checked.map(item => (
                   <View key={item.id} style={styles.checkRow}>
                     <Pressable onPress={() => toggleItem(item.id)} hitSlop={8}>
                       <View style={styles.checkCircleDone}>
@@ -328,7 +337,16 @@ function ArchiveView({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function NotesPage() {
+export interface NotesPageHandle {
+  scrollToIndex: (index: number) => void;
+}
+
+interface NotesPageProps {
+  onNotesChange?: (notes: Note[]) => void;
+  onPageChange?: (index: number) => void;
+}
+
+const NotesPage = forwardRef<NotesPageHandle, NotesPageProps>(function NotesPage({ onNotesChange, onPageChange }, ref) {
   const { width } = useWindowDimensions();
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
@@ -341,6 +359,17 @@ export default function NotesPage() {
   const creating = useRef(false);
   const currentIdxRef = useRef(0);
   const reorderAnchorRef = useRef<string | null>(null);
+
+  useImperativeHandle(ref, () => ({
+    scrollToIndex: (index: number) => {
+      flatRef.current?.scrollToIndex({ index, animated: false });
+      currentIdxRef.current = index;
+    },
+  }), []);
+
+  useEffect(() => {
+    onNotesChange?.(notes);
+  }, [notes, onNotesChange]);
 
   useEffect(() => {
     supabase
@@ -572,6 +601,7 @@ export default function NotesPage() {
         onMomentumScrollEnd={(e) => {
           const idx = Math.round(e.nativeEvent.contentOffset.x / width);
           currentIdxRef.current = idx;
+          onPageChange?.(idx);
           if (idx === notes.length) handleCreate();
         }}
       />
@@ -598,7 +628,9 @@ export default function NotesPage() {
       </Modal>
     </KeyboardAvoidingView>
   );
-}
+});
+
+export default NotesPage;
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
@@ -748,10 +780,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: C.muted,
   },
-  checkedDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(44,26,14,0.1)',
-    marginVertical: 8,
+  completedHeader: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(44,26,14,0.1)',
+    marginTop: 8,
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
+  completedHeaderText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: C.subdued,
   },
 
   // Reorder modal
