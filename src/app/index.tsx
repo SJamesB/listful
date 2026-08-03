@@ -16,7 +16,7 @@ import { makeConfig, type CategoryConfig } from '@/lib/logCategories';
 import { completeWebAuth } from '@/lib/spotify';
 import { supabase } from '@/lib/supabase';
 import { LogPage } from '@/screens/LogPage';
-import NotesPage from '@/screens/NotesPage';
+import NotesPage, { type Note, type NotesPageHandle } from '@/screens/NotesPage';
 import CinemaPosterPage, { type CinemaPosterPageProps } from '@/screens/CinemaPosterPage';
 import LibraryBookPage, { type LibraryBookPageProps } from '@/screens/LibraryBookPage';
 import SpotifyPage from '@/screens/SpotifyPage';
@@ -95,6 +95,7 @@ export default function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [vaultConfigs, setVaultConfigs] = useState<CategoryConfig[]>([]);
   const [spotifyPlaylists, setSpotifyPlaylists] = useState<SpotifyPinnedPlaylist[]>([]);
+  const [notesList, setNotesList] = useState<Note[]>([]);
   const [sectionIndex, setSectionIndex] = useState(0);
   const [sectionPage, setSectionPage] = useState({ organise: 0, vault: 0, notes: 0, cinema: 0, library: 0, spotify: 0 });
   const [pagerHeight, setPagerHeight] = useState(0);
@@ -103,6 +104,7 @@ export default function App() {
 
   const verticalRef = useRef<VerticalSectionPagerHandle>(null);
   const organiseRef = useRef<SectionPagerHandle>(null);
+  const notesRef = useRef<NotesPageHandle>(null);
   const vaultRef = useRef<SectionPagerHandle>(null);
   const cinemaRef = useRef<SectionPagerHandle>(null);
   const libraryRef = useRef<SectionPagerHandle>(null);
@@ -301,6 +303,11 @@ export default function App() {
     [vaultConfigs],
   );
 
+  const notesMenuItems = useMemo(
+    () => notesList.map((note, i) => ({ localIndex: i, label: note.title.trim() || 'Untitled' })),
+    [notesList],
+  );
+
   const spotifyMenuItems = useMemo(() => [
     { localIndex: 0, label: '🎵 Music' },
     ...spotifyPlaylists.map((p, i) => ({
@@ -317,6 +324,7 @@ export default function App() {
 
     const ref =
       section === 'organise' ? organiseRef :
+      section === 'notes'    ? notesRef :
       section === 'vault'    ? vaultRef :
       section === 'cinema'   ? cinemaRef :
       section === 'library'  ? libraryRef :
@@ -344,7 +352,13 @@ export default function App() {
     },
     {
       key: 'notes',
-      render: () => <NotesPage />,
+      render: () => (
+        <NotesPage
+          ref={notesRef}
+          onNotesChange={setNotesList}
+          onPageChange={(i) => setSectionPage((p) => ({ ...p, notes: i }))}
+        />
+      ),
     },
     {
       key: 'vault',
@@ -442,6 +456,7 @@ export default function App() {
         currentLocalIndex={sectionPage[currentSection]}
         onSelectPage={navigateTo}
         onClose={() => setDrawerOpen(false)}
+        notesPages={notesMenuItems}
         vaultPages={vaultMenuItems}
         cinemaPages={CINEMA_MENU_ITEMS}
         libraryPages={LIBRARY_MENU_ITEMS}

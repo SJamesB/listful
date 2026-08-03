@@ -23,6 +23,7 @@ interface Props {
   currentLocalIndex: number;
   onSelectPage: (section: Section, localIndex: number) => void;
   onClose: () => void;
+  notesPages: MenuItem[];
   vaultPages: MenuItem[];
   cinemaPages: MenuItem[];
   libraryPages: MenuItem[];
@@ -35,6 +36,7 @@ export function SideDrawer({
   currentLocalIndex,
   onSelectPage,
   onClose,
+  notesPages,
   vaultPages,
   cinemaPages,
   libraryPages,
@@ -119,16 +121,20 @@ export function SideDrawer({
             <Text style={styles.sectionLabel}>Notes</Text>
             <Text style={styles.chevron}>{expanded.has('notes') ? '▾' : '▸'}</Text>
           </Pressable>
-          {expanded.has('notes') && (
+          {expanded.has('notes') && notesPages.map((item) => (
             <Pressable
-              style={[styles.item, currentSection === 'notes' && styles.itemActive]}
-              onPress={() => onSelectPage('notes', 0)}
+              key={item.localIndex}
+              style={[styles.item, isActive('notes', item) && styles.itemActive]}
+              onPress={() => onSelectPage('notes', item.localIndex)}
             >
-              <Text style={[styles.itemText, currentSection === 'notes' && styles.itemTextActive]}>
-                📜 Notes
+              <Text
+                style={[styles.itemText, isActive('notes', item) && styles.itemTextActive]}
+                numberOfLines={1}
+              >
+                📜 {item.label}
               </Text>
             </Pressable>
-          )}
+          ))}
 
           <View style={styles.divider} />
 
