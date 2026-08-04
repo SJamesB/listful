@@ -52,6 +52,7 @@ interface SearchResult {
   author: string | null;
   year: string | null;
   cover_url: string | null;
+  publisher: string | null;
 }
 
 export type LibraryBookPageProps =
@@ -75,6 +76,8 @@ const coverUri = (coverUrl: string | null, size: 'M' | 'L' = 'M') => {
   if (coverUrl.endsWith('-M.jpg')) return coverUrl.replace(/-M\.jpg$/, '-L.jpg');
   return coverUrl;
 };
+
+const isPenguinEdition = (publisher: string | null) => !!publisher && /penguin/i.test(publisher);
 
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
@@ -131,6 +134,12 @@ export default function LibraryBookPage(props: Props) {
   const [addedKeys, setAddedKeys] = useState<Set<string>>(new Set());
 
   const [actionItem, setActionItem] = useState<LibraryItem | null>(null);
+
+  const [coverItem, setCoverItem] = useState<LibraryItem | null>(null);
+  const [coverQuery, setCoverQuery] = useState('');
+  const [coverSearching, setCoverSearching] = useState(false);
+  const [coverError, setCoverError] = useState<string | null>(null);
+  const [coverResults, setCoverResults] = useState<SearchResult[]>([]);
 
   const [detailItem, setDetailItem] = useState<LibraryItem | null>(null);
 
@@ -192,6 +201,63 @@ export default function LibraryBookPage(props: Props) {
     setSearchError(null);
     setAddedKeys(new Set());
     setSearchOpen(true);
+  };
+
+  const openCoverPicker = (item: LibraryItem) => {
+    setActionItem(null);
+    setCoverResults([]);
+    setCoverError(null);
+    setCoverItem(item);
+    setCoverQuery([item.title, item.author].filter(Boolean).join(' '));
+  };
+
+  const closeCoverPicker = () => {
+    setCoverItem(null);
+    setCoverQuery('');
+    setCoverResults([]);
+    setCoverError(null);
+  };
+
+  // Debounced cover search, scoped to the item being edited
+  useEffect(() => {
+    if (!coverItem) return;
+    const trimmed = coverQuery.trim();
+    if (!trimmed) {
+      setCoverResults([]);
+      setCoverError(null);
+      setCoverSearching(false);
+      return;
+    }
+    setCoverSearching(true);
+    const timeout = setTimeout(async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke('books-search', {
+          body: { query: trimmed },
+        });
+        if (error) throw new Error(error.message);
+        if (data?.error) throw new Error(data.error);
+        setCoverResults(((data?.results ?? []) as SearchResult[]).filter((r) => r.cover_url));
+        setCoverError(null);
+      } catch (err) {
+        setCoverError(err instanceof Error ? err.message : String(err));
+        setCoverResults([]);
+      } finally {
+        setCoverSearching(false);
+      }
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timeout);
+  }, [coverQuery, coverItem]);
+
+  const selectCover = async (result: SearchResult) => {
+    if (!coverItem || !result.cover_url) return;
+    const { error } = await supabase
+      .from('library_items')
+      .update({ cover_url: result.cover_url })
+      .eq('id', coverItem.id);
+    if (!error) {
+      closeCoverPicker();
+      load();
+    }
   };
 
   const addResult = async (result: SearchResult) => {
@@ -340,6 +406,43 @@ export default function LibraryBookPage(props: Props) {
         </View>
         <Text style={styles.resultTitle} numberOfLines={2}>{item.title}</Text>
         {item.author ? <Text style={styles.resultYear} numberOfLines={1}>{item.author}</Text> : null}
+        {item.publisher ? (
+          <Text
+            style={[styles.resultPublisher, isPenguinEdition(item.publisher) && styles.resultPublisherPenguin]}
+            numberOfLines={1}
+          >
+            {item.publisher}
+          </Text>
+        ) : null}
+      </Pressable>
+    );
+  };
+
+  const renderCoverResult = ({ item }: { item: SearchResult }) => {
+    const current = coverItem?.cover_url === item.cover_url;
+    return (
+      <Pressable style={[styles.resultWrap, { width: resultWidth }]} onPress={() => selectCover(item)}>
+        <View>
+          <Image
+            source={{ uri: coverUri(item.cover_url)! }}
+            style={[styles.resultCover, { width: resultWidth, height: resultHeight }]}
+            contentFit="cover"
+          />
+          {current && (
+            <View style={styles.addedBadge}>
+              <Text style={styles.addedBadgeText}>✓</Text>
+            </View>
+          )}
+        </View>
+        {item.publisher ? (
+          <Text
+            style={[styles.resultPublisher, isPenguinEdition(item.publisher) && styles.resultPublisherPenguin]}
+            numberOfLines={1}
+          >
+            {item.publisher}
+          </Text>
+        ) : null}
+        {item.year ? <Text style={styles.resultYear} numberOfLines={1}>{item.year}</Text> : null}
       </Pressable>
     );
   };
@@ -446,6 +549,59 @@ export default function LibraryBookPage(props: Props) {
         </KeyboardAvoidingView>
       </Modal>
 
+      <Modal
+        visible={!!coverItem}
+        animationType="slide"
+        transparent
+        presentationStyle="overFullScreen"
+        onRequestClose={closeCoverPicker}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+        >
+          <View style={[styles.modalCard, { maxHeight: height * 0.85 }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle} numberOfLines={1}>
+                Change cover: {coverItem?.title}
+              </Text>
+              <Pressable onPress={closeCoverPicker} hitSlop={8}>
+                <Text style={styles.doneText}>Done</Text>
+              </Pressable>
+            </View>
+            <TextInput
+              style={styles.modalInput}
+              value={coverQuery}
+              onChangeText={setCoverQuery}
+              placeholder="Search covers"
+              placeholderTextColor={C.muted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+            />
+            {coverError ? <Text style={styles.errorText}>{coverError}</Text> : null}
+            {coverSearching ? (
+              <ActivityIndicator color={C.accent} style={styles.searchSpinner} />
+            ) : (
+              <FlatList
+                style={styles.resultsList}
+                data={coverResults}
+                keyExtractor={(item) => item.key}
+                renderItem={renderCoverResult}
+                numColumns={COLS}
+                columnWrapperStyle={{ gap: GAP }}
+                contentContainerStyle={styles.resultsGrid}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+                ListEmptyComponent={
+                  coverQuery.trim() ? <Text style={styles.emptyText}>No covers found</Text> : null
+                }
+              />
+            )}
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       {/* Book detail modal */}
       <Modal
         visible={!!detailItem}
@@ -508,6 +664,12 @@ export default function LibraryBookPage(props: Props) {
         <Pressable style={styles.actionOverlay} onPress={() => setActionItem(null)}>
           <Pressable style={styles.actionCard} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.actionTitle} numberOfLines={2}>{actionItem?.title}</Text>
+            <Pressable
+              style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
+              onPress={() => actionItem && openCoverPicker(actionItem)}
+            >
+              <Text style={styles.actionBtnText}>Change cover</Text>
+            </Pressable>
             {mode === 'favorites' ? (
               <Pressable
                 style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
@@ -694,6 +856,8 @@ const styles = StyleSheet.create({
     lineHeight: 15,
   },
   resultYear: { fontSize: 11, color: C.muted, marginTop: 2 },
+  resultPublisher: { fontSize: 10, color: C.muted, marginTop: 2 },
+  resultPublisherPenguin: { color: C.accent, fontWeight: '700' },
   addedBadge: {
     position: 'absolute',
     top: 4,

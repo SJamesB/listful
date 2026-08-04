@@ -6,12 +6,19 @@ const CORS = {
 const GOOGLE_BOOKS_BASE = 'https://www.googleapis.com/books/v1/volumes';
 const OPEN_LIBRARY_SEARCH_URL = 'https://openlibrary.org/search.json';
 
+// Cap on how many distinct cover editions we keep per book, and how we rank
+// them - editions from a Penguin imprint (Modern Classics, Sci-Fi/SF
+// Masterworks, etc.) are boosted to the front so they're easy to spot.
+const MAX_EDITIONS_PER_BOOK = 8;
+const PENGUIN_RE = /penguin/i;
+
 interface LibraryResult {
   key: string;
   title: string;
   author: string | null;
   year: string | null;
   cover_url: string | null;
+  publisher: string | null;
 }
 
 interface GoogleVolume {
@@ -20,6 +27,7 @@ interface GoogleVolume {
     title?: string;
     authors?: string[];
     publishedDate?: string;
+    publisher?: string;
     imageLinks?: { thumbnail?: string; smallThumbnail?: string };
   };
 }
@@ -30,6 +38,7 @@ interface OpenLibraryDoc {
   author_name?: string[];
   first_publish_year?: number;
   cover_i?: number;
+  publisher?: string[];
 }
 
 function respond(data: unknown, status = 200) {
@@ -49,6 +58,7 @@ function fromGoogle(volume: GoogleVolume): LibraryResult | null {
     author: info.authors?.join(', ') ?? null,
     year: info.publishedDate ? info.publishedDate.slice(0, 4) : null,
     cover_url: thumbnail ? thumbnail.replace(/^http:/, 'https:') : null,
+    publisher: info.publisher ?? null,
   };
 }
 
@@ -60,6 +70,7 @@ function fromOpenLibrary(doc: OpenLibraryDoc): LibraryResult | null {
     author: doc.author_name?.join(', ') ?? null,
     year: doc.first_publish_year ? String(doc.first_publish_year) : null,
     cover_url: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : null,
+    publisher: doc.publisher?.[0] ?? null,
   };
 }
 
@@ -69,7 +80,7 @@ function dedupeKey(result: LibraryResult): string {
 
 async function searchGoogle(query: string): Promise<LibraryResult[]> {
   const apiKey = Deno.env.get('GOOGLE_BOOKS_API_KEY');
-  const params = new URLSearchParams({ q: query, maxResults: '24' });
+  const params = new URLSearchParams({ q: query, maxResults: '40' });
   if (apiKey) params.set('key', apiKey);
   const res = await fetch(`${GOOGLE_BOOKS_BASE}?${params.toString()}`);
   if (!res.ok) return [];
@@ -82,8 +93,8 @@ async function searchGoogle(query: string): Promise<LibraryResult[]> {
 async function searchOpenLibrary(query: string): Promise<LibraryResult[]> {
   const params = new URLSearchParams({
     q: query,
-    limit: '24',
-    fields: 'key,title,author_name,first_publish_year,cover_i,subject',
+    limit: '40',
+    fields: 'key,title,author_name,first_publish_year,cover_i,publisher,subject',
   });
   const res = await fetch(`${OPEN_LIBRARY_SEARCH_URL}?${params.toString()}`);
   if (!res.ok) return [];
@@ -93,20 +104,50 @@ async function searchOpenLibrary(query: string): Promise<LibraryResult[]> {
     .filter((item): item is LibraryResult => item !== null);
 }
 
+function editionRank(result: LibraryResult): number {
+  const isPenguin = result.publisher ? PENGUIN_RE.test(result.publisher) : false;
+  if (isPenguin && result.cover_url) return 0;
+  if (isPenguin) return 1;
+  if (result.cover_url) return 2;
+  return 3;
+}
+
+// Groups results by title+author so every distinct cover edition of the same
+// book stays available (rather than collapsing to a single "best" cover),
+// with Penguin editions ranked first within each group.
 function merge(sources: LibraryResult[][]): LibraryResult[] {
-  const byKey = new Map<string, LibraryResult>();
+  const groups = new Map<string, LibraryResult[]>();
+  const order: string[] = [];
+
   for (const results of sources) {
     for (const result of results) {
       const dKey = dedupeKey(result);
-      const existing = byKey.get(dKey);
+      if (!groups.has(dKey)) {
+        groups.set(dKey, []);
+        order.push(dKey);
+      }
+      const group = groups.get(dKey)!;
+      const existing = group.find(
+        (r) => r.key === result.key || (r.cover_url && r.cover_url === result.cover_url),
+      );
       if (!existing) {
-        byKey.set(dKey, result);
-      } else if (!existing.cover_url && result.cover_url) {
-        byKey.set(dKey, { ...existing, cover_url: result.cover_url });
+        group.push(result);
+      } else if (!existing.publisher && result.publisher) {
+        existing.publisher = result.publisher;
       }
     }
   }
-  return Array.from(byKey.values());
+
+  const flattened: LibraryResult[] = [];
+  for (const dKey of order) {
+    const group = groups.get(dKey)!;
+    const withCover = group.filter((r) => r.cover_url);
+    const ranked = (withCover.length > 0 ? withCover : group).sort(
+      (a, b) => editionRank(a) - editionRank(b),
+    );
+    flattened.push(...ranked.slice(0, MAX_EDITIONS_PER_BOOK));
+  }
+  return flattened;
 }
 
 Deno.serve(async (req) => {
@@ -120,12 +161,19 @@ Deno.serve(async (req) => {
     const trimmed = query?.trim();
     if (!trimmed) return respond({ error: 'query is required' });
 
-    const [google, openLibrary] = await Promise.all([
-      searchGoogle(trimmed).catch(() => []),
-      searchOpenLibrary(trimmed).catch(() => []),
-    ]);
+    // Run the plain query plus a Penguin-boosted variant in parallel, so a
+    // Penguin Modern Classics / Penguin Sci-Fi edition that wouldn't
+    // otherwise rank highly for the bare title still gets pulled in.
+    const queries = PENGUIN_RE.test(trimmed) ? [trimmed] : [trimmed, `${trimmed} penguin classics`];
 
-    return respond({ results: merge([google, openLibrary]) });
+    const sourceResults = await Promise.all(
+      queries.flatMap((q) => [
+        searchGoogle(q).catch(() => []),
+        searchOpenLibrary(q).catch(() => []),
+      ]),
+    );
+
+    return respond({ results: merge(sourceResults) });
   } catch (err) {
     return respond({ error: String(err) });
   }
