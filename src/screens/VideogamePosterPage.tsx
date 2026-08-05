@@ -9,10 +9,13 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StyleProp,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
+  ViewStyle,
   useWindowDimensions,
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
@@ -42,6 +45,8 @@ interface VideogameItem {
   year: string | null;
   cover_url: string | null;
   sort_order: number | null;
+  status: 'to_play' | 'play' | null;
+  nine_club: boolean;
 }
 
 interface SearchResult {
@@ -67,11 +72,39 @@ type Props = VideogamePosterPageProps & { onEdgesChange?: EdgesChangeHandler };
 
 const coverUri = (path: string | null) => path;
 
+const STATUS_OPTIONS: { key: 'to_play' | 'play'; label: string }[] = [
+  { key: 'to_play', label: 'To Play' },
+  { key: 'play', label: 'Played' },
+];
+
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.detailRow}>
       <Text style={styles.detailLabel}>{label}</Text>
       <Text style={styles.detailValue} numberOfLines={3}>{value}</Text>
+    </View>
+  );
+}
+
+function FilterRow<T extends string>({ options, active, onSelect, style }: {
+  options: { key: T; label: string }[];
+  active: T;
+  onSelect: (key: T) => void;
+  style?: StyleProp<ViewStyle>;
+}) {
+  return (
+    <View style={[styles.filterRow, style]}>
+      {options.map((o) => (
+        <Pressable
+          key={o.key}
+          onPress={() => onSelect(o.key)}
+          style={[styles.filterChip, active === o.key && styles.filterChipActive]}
+        >
+          <Text style={[styles.filterChipText, active === o.key && styles.filterChipTextActive]}>
+            {o.label}
+          </Text>
+        </Pressable>
+      ))}
     </View>
   );
 }
@@ -110,7 +143,7 @@ export default function VideogamePosterPage(props: Props) {
   const load = useCallback(async () => {
     let q = supabase
       .from('videogame_items')
-      .select('id, igdb_id, title, year, cover_url, sort_order');
+      .select('id, igdb_id, title, year, cover_url, sort_order, status, nine_club');
     q = mode === 'nine_club' ? q.eq('nine_club', true) : q.eq('status', status!);
     const { data } = await q.order('sort_order', { ascending: false, nullsFirst: false });
     if (data) setItems(data as VideogameItem[]);
@@ -179,6 +212,9 @@ export default function VideogamePosterPage(props: Props) {
     if (mode === 'nine_club') {
       payload.nine_club = true;
       payload.nine_club_added_at = now;
+      payload.status = 'play';
+      payload.added_at = now;
+      payload.played_at = now;
     } else {
       payload.status = status;
       payload.added_at = now;
@@ -191,27 +227,18 @@ export default function VideogamePosterPage(props: Props) {
     }
   };
 
-  const markPlayed = async (item: VideogameItem) => {
-    await supabase
-      .from('videogame_items')
-      .update({ status: 'play', played_at: new Date().toISOString() })
-      .eq('id', item.id);
-    setActionItem(null);
-    load();
-  };
-
-  const moveToBacklog = async (item: VideogameItem) => {
-    await supabase
-      .from('videogame_items')
-      .update({ status: 'to_play', played_at: null })
-      .eq('id', item.id);
-    setActionItem(null);
-    load();
-  };
-
   const removeItem = async (item: VideogameItem) => {
     await supabase.from('videogame_items').delete().eq('id', item.id);
     setActionItem(null);
+    load();
+  };
+
+  const updateItemStatus = async (item: VideogameItem, newStatus: 'to_play' | 'play') => {
+    await supabase
+      .from('videogame_items')
+      .update({ status: newStatus, played_at: newStatus === 'play' ? new Date().toISOString() : null })
+      .eq('id', item.id);
+    setActionItem((prev) => (prev ? { ...prev, status: newStatus } : prev));
     load();
   };
 
@@ -234,12 +261,12 @@ export default function VideogamePosterPage(props: Props) {
     setDetailData(null);
   }, []);
 
-  const removeFromNineClub = async (item: VideogameItem) => {
+  const toggleNineClub = async (item: VideogameItem, nineClub: boolean) => {
     await supabase
       .from('videogame_items')
-      .update({ nine_club: false, nine_club_added_at: null })
+      .update({ nine_club: nineClub, nine_club_added_at: nineClub ? new Date().toISOString() : null })
       .eq('id', item.id);
-    setActionItem(null);
+    setActionItem((prev) => (prev ? { ...prev, nine_club: nineClub } : prev));
     load();
   };
 
@@ -504,41 +531,35 @@ export default function VideogamePosterPage(props: Props) {
         <Pressable style={styles.actionOverlay} onPress={() => setActionItem(null)}>
           <Pressable style={styles.actionCard} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.actionTitle} numberOfLines={2}>{actionItem?.title}</Text>
-            {mode === 'nine_club' ? (
-              <Pressable
-                style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
-                onPress={() => actionItem && removeFromNineClub(actionItem)}
-              >
-                <Text style={styles.actionBtnText}>Remove from 9-Club</Text>
-              </Pressable>
-            ) : status === 'to_play' ? (
-              <Pressable
-                style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
-                onPress={() => actionItem && markPlayed(actionItem)}
-              >
-                <Text style={styles.actionBtnText}>Mark as played</Text>
-              </Pressable>
-            ) : (
-              <Pressable
-                style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
-                onPress={() => actionItem && moveToBacklog(actionItem)}
-              >
-                <Text style={styles.actionBtnText}>Move to Backlog</Text>
-              </Pressable>
-            )}
-            {mode === 'play' && (
-              <Pressable
-                style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
-                onPress={() => actionItem && removeItem(actionItem)}
-              >
-                <Text style={[styles.actionBtnText, styles.actionBtnDanger]}>Remove</Text>
-              </Pressable>
-            )}
+
+            <Text style={styles.editSectionLabel}>Status</Text>
+            <FilterRow
+              options={STATUS_OPTIONS}
+              active={actionItem?.status ?? 'to_play'}
+              onSelect={(s) => actionItem && updateItemStatus(actionItem, s)}
+              style={styles.editFilterRow}
+            />
+
+            <View style={styles.switchRow}>
+              <Text style={styles.switchLabel}>In 9-Club</Text>
+              <Switch
+                value={!!actionItem?.nine_club}
+                onValueChange={(v) => { if (actionItem) toggleNineClub(actionItem, v); }}
+                trackColor={{ true: C.accent }}
+              />
+            </View>
+
+            <Pressable
+              style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
+              onPress={() => actionItem && removeItem(actionItem)}
+            >
+              <Text style={[styles.actionBtnText, styles.actionBtnDanger]}>Remove</Text>
+            </Pressable>
             <Pressable
               style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
               onPress={() => setActionItem(null)}
             >
-              <Text style={styles.actionBtnText}>Cancel</Text>
+              <Text style={styles.actionBtnText}>Done</Text>
             </Pressable>
           </Pressable>
         </Pressable>
@@ -607,6 +628,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   addBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  filterRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: PADDING,
+    marginBottom: 12,
+  },
+  filterChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: 'rgba(26,22,38,0.06)',
+  },
+  filterChipActive: {
+    backgroundColor: C.accent,
+  },
+  filterChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: C.muted,
+  },
+  filterChipTextActive: {
+    color: '#fff',
+  },
   errorText: {
     fontSize: 12,
     color: C.danger,
@@ -796,6 +840,37 @@ const styles = StyleSheet.create({
     color: C.text,
     marginBottom: 8,
     textAlign: 'center',
+  },
+  editSectionLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: C.muted,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginTop: 8,
+    marginBottom: 6,
+  },
+  editFilterRow: {
+    paddingHorizontal: 0,
+    marginBottom: 4,
+    flexWrap: 'wrap',
+  },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    marginTop: 4,
+    marginBottom: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(26,22,38,0.08)',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(26,22,38,0.08)',
+  },
+  switchLabel: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: C.text,
   },
   actionBtn: {
     paddingVertical: 12,

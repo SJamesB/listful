@@ -9,10 +9,13 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StyleProp,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
+  ViewStyle,
   useWindowDimensions,
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
@@ -45,6 +48,8 @@ interface LibraryItem {
   cover_url: string | null;
   category: LibraryCategory;
   sort_order: number | null;
+  status: 'to_read' | 'read' | null;
+  nine_club: boolean;
 }
 
 interface SearchResult {
@@ -68,6 +73,11 @@ const CATEGORIES: { key: LibraryCategory; label: string }[] = [
   { key: 'graphic_novel', label: 'Graphic Novel' },
 ];
 
+const STATUS_OPTIONS: { key: 'to_read' | 'read'; label: string }[] = [
+  { key: 'to_read', label: 'To Read' },
+  { key: 'read', label: 'Read' },
+];
+
 const matchKey = (title: string, author: string | null) =>
   `${title.trim().toLowerCase()}|${(author ?? '').trim().toLowerCase()}`;
 
@@ -89,13 +99,14 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function FilterRow<T extends string>({ options, active, onSelect }: {
+function FilterRow<T extends string>({ options, active, onSelect, style }: {
   options: { key: T; label: string }[];
   active: T;
   onSelect: (key: T) => void;
+  style?: StyleProp<ViewStyle>;
 }) {
   return (
-    <View style={styles.filterRow}>
+    <View style={[styles.filterRow, style]}>
       {options.map((o) => (
         <Pressable
           key={o.key}
@@ -150,7 +161,7 @@ export default function LibraryBookPage(props: Props) {
   const load = useCallback(async () => {
     let q = supabase
       .from('library_items')
-      .select('id, title, author, year, cover_url, category, sort_order')
+      .select('id, title, author, year, cover_url, category, sort_order, status, nine_club')
       .eq('category', category);
     q = mode === 'nine_club' ? q.eq('nine_club', true) : q.eq('status', status!);
     const { data } = await q.order('sort_order', { ascending: false, nullsFirst: false });
@@ -276,6 +287,8 @@ export default function LibraryBookPage(props: Props) {
     if (mode === 'nine_club') {
       payload.nine_club = true;
       payload.nine_club_added_at = now;
+      payload.status = 'read';
+      payload.read_at = now;
     } else {
       payload.status = status;
       payload.read_at = status === 'read' ? now : null;
@@ -287,36 +300,33 @@ export default function LibraryBookPage(props: Props) {
     }
   };
 
-  const markRead = async (item: LibraryItem) => {
-    await supabase
-      .from('library_items')
-      .update({ status: 'read', read_at: new Date().toISOString() })
-      .eq('id', item.id);
-    setActionItem(null);
-    load();
-  };
-
-  const moveToReadList = async (item: LibraryItem) => {
-    await supabase
-      .from('library_items')
-      .update({ status: 'to_read', read_at: null })
-      .eq('id', item.id);
-    setActionItem(null);
-    load();
-  };
-
   const removeItem = async (item: LibraryItem) => {
     await supabase.from('library_items').delete().eq('id', item.id);
     setActionItem(null);
     load();
   };
 
-  const removeFromNineClub = async (item: LibraryItem) => {
+  const updateItemCategory = async (item: LibraryItem, newCategory: LibraryCategory) => {
+    await supabase.from('library_items').update({ category: newCategory }).eq('id', item.id);
+    setActionItem((prev) => (prev ? { ...prev, category: newCategory } : prev));
+    load();
+  };
+
+  const updateItemStatus = async (item: LibraryItem, newStatus: 'to_read' | 'read') => {
     await supabase
       .from('library_items')
-      .update({ nine_club: false, nine_club_added_at: null })
+      .update({ status: newStatus, read_at: newStatus === 'read' ? new Date().toISOString() : null })
       .eq('id', item.id);
-    setActionItem(null);
+    setActionItem((prev) => (prev ? { ...prev, status: newStatus } : prev));
+    load();
+  };
+
+  const toggleNineClub = async (item: LibraryItem, nineClub: boolean) => {
+    await supabase
+      .from('library_items')
+      .update({ nine_club: nineClub, nine_club_added_at: nineClub ? new Date().toISOString() : null })
+      .eq('id', item.id);
+    setActionItem((prev) => (prev ? { ...prev, nine_club: nineClub } : prev));
     load();
   };
 
@@ -668,47 +678,49 @@ export default function LibraryBookPage(props: Props) {
         <Pressable style={styles.actionOverlay} onPress={() => setActionItem(null)}>
           <Pressable style={styles.actionCard} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.actionTitle} numberOfLines={2}>{actionItem?.title}</Text>
+
+            <Text style={styles.editSectionLabel}>Category</Text>
+            <FilterRow
+              options={CATEGORIES}
+              active={actionItem?.category ?? 'fiction'}
+              onSelect={(c) => actionItem && updateItemCategory(actionItem, c)}
+              style={styles.editFilterRow}
+            />
+
+            <Text style={styles.editSectionLabel}>Status</Text>
+            <FilterRow
+              options={STATUS_OPTIONS}
+              active={actionItem?.status ?? 'to_read'}
+              onSelect={(s) => actionItem && updateItemStatus(actionItem, s)}
+              style={styles.editFilterRow}
+            />
+
+            <View style={styles.switchRow}>
+              <Text style={styles.switchLabel}>In 9-Club</Text>
+              <Switch
+                value={!!actionItem?.nine_club}
+                onValueChange={(v) => { if (actionItem) toggleNineClub(actionItem, v); }}
+                trackColor={{ true: C.accent }}
+              />
+            </View>
+
             <Pressable
               style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
               onPress={() => actionItem && openCoverPicker(actionItem)}
             >
               <Text style={styles.actionBtnText}>Change cover</Text>
             </Pressable>
-            {mode === 'nine_club' ? (
-              <Pressable
-                style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
-                onPress={() => actionItem && removeFromNineClub(actionItem)}
-              >
-                <Text style={styles.actionBtnText}>Remove from 9-Club</Text>
-              </Pressable>
-            ) : status === 'to_read' ? (
-              <Pressable
-                style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
-                onPress={() => actionItem && markRead(actionItem)}
-              >
-                <Text style={styles.actionBtnText}>Mark as read</Text>
-              </Pressable>
-            ) : (
-              <Pressable
-                style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
-                onPress={() => actionItem && moveToReadList(actionItem)}
-              >
-                <Text style={styles.actionBtnText}>Move to To Read</Text>
-              </Pressable>
-            )}
-            {mode === 'read' && (
-              <Pressable
-                style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
-                onPress={() => actionItem && removeItem(actionItem)}
-              >
-                <Text style={[styles.actionBtnText, styles.actionBtnDanger]}>Remove</Text>
-              </Pressable>
-            )}
+            <Pressable
+              style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
+              onPress={() => actionItem && removeItem(actionItem)}
+            >
+              <Text style={[styles.actionBtnText, styles.actionBtnDanger]}>Remove</Text>
+            </Pressable>
             <Pressable
               style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
               onPress={() => setActionItem(null)}
             >
-              <Text style={styles.actionBtnText}>Cancel</Text>
+              <Text style={styles.actionBtnText}>Done</Text>
             </Pressable>
           </Pressable>
         </Pressable>
@@ -991,6 +1003,37 @@ const styles = StyleSheet.create({
     color: C.text,
     marginBottom: 8,
     textAlign: 'center',
+  },
+  editSectionLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: C.muted,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginTop: 8,
+    marginBottom: 6,
+  },
+  editFilterRow: {
+    paddingHorizontal: 0,
+    marginBottom: 4,
+    flexWrap: 'wrap',
+  },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    marginTop: 4,
+    marginBottom: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(26,22,38,0.08)',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(26,22,38,0.08)',
+  },
+  switchLabel: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: C.text,
   },
   actionBtn: {
     paddingVertical: 12,
