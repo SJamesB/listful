@@ -234,10 +234,21 @@ export default function VideogamePosterPage(props: Props) {
   };
 
   const updateItemStatus = async (item: VideogameItem, newStatus: 'to_play' | 'play') => {
-    await supabase
-      .from('videogame_items')
-      .update({ status: newStatus, played_at: newStatus === 'play' ? new Date().toISOString() : null })
-      .eq('id', item.id);
+    const payload: Record<string, unknown> = {
+      status: newStatus,
+      played_at: newStatus === 'play' ? new Date().toISOString() : null,
+    };
+    if (newStatus === 'play') {
+      const { data: maxRow } = await supabase
+        .from('videogame_items')
+        .select('sort_order')
+        .eq('status', 'play')
+        .order('sort_order', { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle();
+      payload.sort_order = (maxRow?.sort_order ?? -1) + 1;
+    }
+    await supabase.from('videogame_items').update(payload).eq('id', item.id);
     setActionItem((prev) => (prev ? { ...prev, status: newStatus } : prev));
     load();
   };
