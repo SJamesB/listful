@@ -159,7 +159,7 @@ export default function CinemaPosterPage(props: Props) {
       .select('id, tmdb_id, category, title, year, poster_path, sort_order')
       .eq('category', category);
     q = mode === 'nine_club' ? q.eq('nine_club', true) : q.eq('status', status!);
-    const { data } = await q.order('sort_order', { ascending: true, nullsFirst: false });
+    const { data } = await q.order('sort_order', { ascending: false, nullsFirst: false });
     if (data) setItems(data as CinemaItem[]);
     setLoading(false);
   }, [mode, status, category]);
@@ -221,7 +221,10 @@ export default function CinemaPosterPage(props: Props) {
       year: result.year,
       poster_path: result.poster_path,
     };
-    if (isNew) payload.sort_order = items.length;
+    if (isNew) {
+      const maxSortOrder = items.reduce((max, i) => (i.sort_order != null && i.sort_order > max ? i.sort_order : max), -1);
+      payload.sort_order = maxSortOrder + 1;
+    }
     if (mode === 'nine_club') {
       payload.nine_club = true;
       payload.nine_club_added_at = now;
@@ -293,9 +296,10 @@ export default function CinemaPosterPage(props: Props) {
 
   const onReorderDragEnd = useCallback(async ({ data }: { data: CinemaItem[] }) => {
     setItems(data);
+    const count = data.length;
     await Promise.all(
       data.map((item, index) =>
-        supabase.from('cinema_items').update({ sort_order: index }).eq('id', item.id),
+        supabase.from('cinema_items').update({ sort_order: count - 1 - index }).eq('id', item.id),
       ),
     );
   }, []);
