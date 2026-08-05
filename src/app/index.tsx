@@ -197,7 +197,7 @@ export default function App() {
   const libraryPageComponents = useMemo(() => [
     getLibraryComponent('toRead',   { title: '📖 To Read', mode: 'read',      status: 'to_read' }),
     getLibraryComponent('read',     { title: '📚 Read',     mode: 'read',      status: 'read'    }),
-    getLibraryComponent('favorites',{ title: '🏆 9-Club',  mode: 'favorites'                    }),
+    getLibraryComponent('nineClub', { title: '🏆 9-Club',  mode: 'nine_club'                    }),
   ], [getLibraryComponent]);
 
   // Cache videogame page components — keyed by page id, props are baked in at creation
