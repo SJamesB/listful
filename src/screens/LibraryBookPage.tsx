@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
 import { supabase } from '@/lib/supabase';
@@ -113,6 +114,7 @@ function FilterRow<T extends string>({ options, active, onSelect }: {
 export default function LibraryBookPage(props: Props) {
   const { title, mode, onEdgesChange } = props;
   const edgeScroll = useSectionEdgeScroll(onEdgesChange);
+  const insets = useSafeAreaInsets();
   const status = mode === 'read' ? props.status : undefined;
   const [category, setCategory] = useState<LibraryCategory>('fiction');
 
@@ -714,7 +716,7 @@ export default function LibraryBookPage(props: Props) {
 
       <Modal visible={reorderOpen} animationType="slide" transparent onRequestClose={closeReorder}>
         <GestureHandlerRootView style={styles.reorderBackdrop}>
-          <View style={styles.reorderSheet}>
+          <View style={[styles.reorderSheet, { paddingBottom: insets.bottom + 24 }]}>
             <View style={styles.reorderHeader}>
               <Text style={styles.reorderHeading}>Reorder</Text>
               <Pressable onPress={closeReorder} hitSlop={12}>
@@ -1017,7 +1019,6 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     maxHeight: '70%',
-    paddingBottom: 24,
   },
   reorderHeader: {
     flexDirection: 'row',
