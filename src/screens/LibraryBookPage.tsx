@@ -151,7 +151,7 @@ export default function LibraryBookPage(props: Props) {
       .select('id, title, author, year, cover_url, category, sort_order')
       .eq('category', category);
     q = mode === 'favorites' ? q.eq('favorite', true) : q.eq('status', status!);
-    const { data } = await q.order('sort_order', { ascending: true, nullsFirst: false });
+    const { data } = await q.order('sort_order', { ascending: false, nullsFirst: false });
     if (data) setItems(data as LibraryItem[]);
     setLoading(false);
   }, [mode, status, category]);
@@ -262,13 +262,14 @@ export default function LibraryBookPage(props: Props) {
 
   const addResult = async (result: SearchResult) => {
     const now = new Date().toISOString();
+    const maxSortOrder = items.reduce((max, i) => (i.sort_order != null && i.sort_order > max ? i.sort_order : max), -1);
     const payload: Record<string, unknown> = {
       title: result.title,
       author: result.author,
       year: result.year,
       cover_url: result.cover_url,
       category,
-      sort_order: items.length,
+      sort_order: maxSortOrder + 1,
     };
     if (mode === 'favorites') {
       payload.favorite = true;
@@ -330,9 +331,10 @@ export default function LibraryBookPage(props: Props) {
 
   const onReorderDragEnd = useCallback(async ({ data }: { data: LibraryItem[] }) => {
     setItems(data);
+    const count = data.length;
     await Promise.all(
       data.map((item, index) =>
-        supabase.from('library_items').update({ sort_order: index }).eq('id', item.id),
+        supabase.from('library_items').update({ sort_order: count - 1 - index }).eq('id', item.id),
       ),
     );
   }, []);
