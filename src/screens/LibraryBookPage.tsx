@@ -48,6 +48,7 @@ interface LibraryItem {
   cover_url: string | null;
   category: LibraryCategory;
   sort_order: number | null;
+  read_at: string | null;
   status: 'to_read' | 'read' | null;
   nine_club: boolean;
 }
@@ -161,10 +162,12 @@ export default function LibraryBookPage(props: Props) {
   const load = useCallback(async () => {
     let q = supabase
       .from('library_items')
-      .select('id, title, author, year, cover_url, category, sort_order, status, nine_club')
+      .select('id, title, author, year, cover_url, category, sort_order, read_at, status, nine_club')
       .eq('category', category);
     q = mode === 'nine_club' ? q.eq('nine_club', true) : q.eq('status', status!);
-    const { data } = await q.order('sort_order', { ascending: false, nullsFirst: false });
+    const { data } = await q
+      .order('sort_order', { ascending: false, nullsFirst: false })
+      .order('read_at', { ascending: false, nullsFirst: false });
     if (data) setItems(data as LibraryItem[]);
     setLoading(false);
   }, [mode, status, category]);
@@ -313,10 +316,22 @@ export default function LibraryBookPage(props: Props) {
   };
 
   const updateItemStatus = async (item: LibraryItem, newStatus: 'to_read' | 'read') => {
-    await supabase
-      .from('library_items')
-      .update({ status: newStatus, read_at: newStatus === 'read' ? new Date().toISOString() : null })
-      .eq('id', item.id);
+    const payload: Record<string, unknown> = {
+      status: newStatus,
+      read_at: newStatus === 'read' ? new Date().toISOString() : null,
+    };
+    if (newStatus === 'read') {
+      const { data: maxRow } = await supabase
+        .from('library_items')
+        .select('sort_order')
+        .eq('category', item.category)
+        .eq('status', 'read')
+        .order('sort_order', { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle();
+      payload.sort_order = (maxRow?.sort_order ?? -1) + 1;
+    }
+    await supabase.from('library_items').update(payload).eq('id', item.id);
     setActionItem((prev) => (prev ? { ...prev, status: newStatus } : prev));
     load();
   };

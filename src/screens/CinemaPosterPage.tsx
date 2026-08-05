@@ -267,10 +267,22 @@ export default function CinemaPosterPage(props: Props) {
   };
 
   const updateItemStatus = async (item: CinemaItem, newStatus: 'to_watch' | 'watched') => {
-    await supabase
-      .from('cinema_items')
-      .update({ status: newStatus, watched_at: newStatus === 'watched' ? new Date().toISOString() : null })
-      .eq('id', item.id);
+    const payload: Record<string, unknown> = {
+      status: newStatus,
+      watched_at: newStatus === 'watched' ? new Date().toISOString() : null,
+    };
+    if (newStatus === 'watched') {
+      const { data: maxRow } = await supabase
+        .from('cinema_items')
+        .select('sort_order')
+        .eq('category', item.category)
+        .eq('status', 'watched')
+        .order('sort_order', { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle();
+      payload.sort_order = (maxRow?.sort_order ?? -1) + 1;
+    }
+    await supabase.from('cinema_items').update(payload).eq('id', item.id);
     setActionItem((prev) => (prev ? { ...prev, status: newStatus } : prev));
     load();
   };
