@@ -7,10 +7,13 @@ const GOOGLE_BOOKS_BASE = 'https://www.googleapis.com/books/v1/volumes';
 const OPEN_LIBRARY_SEARCH_URL = 'https://openlibrary.org/search.json';
 
 // Cap on how many distinct cover editions we keep per book, and how we rank
-// them - editions from a Penguin imprint (Modern Classics, Sci-Fi/SF
-// Masterworks, etc.) are boosted to the front so they're easy to spot.
-const MAX_EDITIONS_PER_BOOK = 8;
+// them - editions from a Penguin imprint are boosted to the front, with the
+// two specific series the user favors (Penguin Modern Classics, Penguin
+// Science Fiction) boosted above any other Penguin edition.
+const MAX_EDITIONS_PER_BOOK = 10;
 const PENGUIN_RE = /penguin/i;
+const PENGUIN_SERIES_RE = /penguin\s+(modern\s+classics|science\s+fiction)/i;
+const PENGUIN_SERIES = ['Penguin Modern Classics', 'Penguin Science Fiction'];
 
 interface LibraryResult {
   key: string;
@@ -104,17 +107,34 @@ async function searchOpenLibrary(query: string): Promise<LibraryResult[]> {
     .filter((item): item is LibraryResult => item !== null);
 }
 
+// Google Books' inpublisher: and Open Library's publisher: field-scoped
+// search operators are far more precise than appending keywords to free
+// text - they ask each source directly for editions from that publisher,
+// instead of hoping relevance ranking surfaces one among free-text matches.
+function googleQueries(base: string): string[] {
+  return [base, ...PENGUIN_SERIES.map((series) => `${base} inpublisher:"${series}"`)];
+}
+
+function openLibraryQueries(base: string): string[] {
+  return [base, ...PENGUIN_SERIES.map((series) => `${base} publisher:"${series}"`)];
+}
+
 function editionRank(result: LibraryResult): number {
-  const isPenguin = result.publisher ? PENGUIN_RE.test(result.publisher) : false;
-  if (isPenguin && result.cover_url) return 0;
-  if (isPenguin) return 1;
-  if (result.cover_url) return 2;
-  return 3;
+  const publisher = result.publisher ?? '';
+  const isSeriesMatch = PENGUIN_SERIES_RE.test(publisher);
+  const isPenguin = PENGUIN_RE.test(publisher);
+  if (isSeriesMatch && result.cover_url) return 0;
+  if (isSeriesMatch) return 1;
+  if (isPenguin && result.cover_url) return 2;
+  if (isPenguin) return 3;
+  if (result.cover_url) return 4;
+  return 5;
 }
 
 // Groups results by title+author so every distinct cover edition of the same
 // book stays available (rather than collapsing to a single "best" cover),
-// with Penguin editions ranked first within each group.
+// with Penguin editions - and Penguin Modern Classics/Science Fiction
+// specifically - ranked first within each group.
 function merge(sources: LibraryResult[][]): LibraryResult[] {
   const groups = new Map<string, LibraryResult[]>();
   const order: string[] = [];
@@ -161,17 +181,16 @@ Deno.serve(async (req) => {
     const trimmed = query?.trim();
     if (!trimmed) return respond({ error: 'query is required' });
 
-    // Run the plain query plus a Penguin-boosted variant in parallel, so a
-    // Penguin Modern Classics / Penguin Sci-Fi edition that wouldn't
-    // otherwise rank highly for the bare title still gets pulled in.
-    const queries = PENGUIN_RE.test(trimmed) ? [trimmed] : [trimmed, `${trimmed} penguin classics`];
+    // If the user already typed "penguin" themselves, don't pile on more
+    // penguin-scoped queries - their query is already doing that work.
+    const boosted = PENGUIN_RE.test(trimmed);
+    const gQueries = boosted ? [trimmed] : googleQueries(trimmed);
+    const olQueries = boosted ? [trimmed] : openLibraryQueries(trimmed);
 
-    const sourceResults = await Promise.all(
-      queries.flatMap((q) => [
-        searchGoogle(q).catch(() => []),
-        searchOpenLibrary(q).catch(() => []),
-      ]),
-    );
+    const sourceResults = await Promise.all([
+      ...gQueries.map((q) => searchGoogle(q).catch(() => [])),
+      ...olQueries.map((q) => searchOpenLibrary(q).catch(() => [])),
+    ]);
 
     return respond({ results: merge(sourceResults) });
   } catch (err) {
