@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -20,7 +20,7 @@ import {
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
 import { supabase } from '@/lib/supabase';
@@ -132,10 +132,21 @@ function FilterRow<T extends string>({ options, active, onSelect, style }: {
   );
 }
 
+// RN's Modal renders into its own native root on Android, outside the app-level
+// SafeAreaProvider's measured view, so useSafeAreaInsets() there reports zero
+// unless a SafeAreaProvider is mounted inside the modal itself.
+function ReorderSheet({ children }: { children: ReactNode }) {
+  const insets = useSafeAreaInsets();
+  return (
+    <View style={[styles.reorderSheet, { paddingBottom: insets.bottom + 24 }]}>
+      {children}
+    </View>
+  );
+}
+
 export default function CinemaPosterPage(props: Props) {
   const { title, mode, onEdgesChange } = props;
   const edgeScroll = useSectionEdgeScroll(onEdgesChange);
-  const insets = useSafeAreaInsets();
   const status = mode === 'watch' ? props.status : undefined;
   const [category, setCategory] = useState<CinemaCategory>('film');
   const searchMediaType = tmdbTypeFor(category);
@@ -629,24 +640,26 @@ export default function CinemaPosterPage(props: Props) {
       </Modal>
 
       <Modal visible={reorderOpen} animationType="slide" transparent onRequestClose={closeReorder}>
-        <GestureHandlerRootView style={styles.reorderBackdrop}>
-          <View style={[styles.reorderSheet, { paddingBottom: insets.bottom + 24 }]}>
-            <View style={styles.reorderHeader}>
-              <Text style={styles.reorderHeading}>Reorder</Text>
-              <Pressable onPress={closeReorder} hitSlop={12}>
-                <Text style={styles.reorderDone}>Done</Text>
-              </Pressable>
-            </View>
-            <DraggableFlatList
-              data={items}
-              keyExtractor={(item) => item.id}
-              renderItem={renderReorderItem}
-              onDragEnd={onReorderDragEnd}
-              activationDistance={5}
-              contentContainerStyle={styles.reorderList}
-            />
-          </View>
-        </GestureHandlerRootView>
+        <SafeAreaProvider>
+          <GestureHandlerRootView style={styles.reorderBackdrop}>
+            <ReorderSheet>
+              <View style={styles.reorderHeader}>
+                <Text style={styles.reorderHeading}>Reorder</Text>
+                <Pressable onPress={closeReorder} hitSlop={12}>
+                  <Text style={styles.reorderDone}>Done</Text>
+                </Pressable>
+              </View>
+              <DraggableFlatList
+                data={items}
+                keyExtractor={(item) => item.id}
+                renderItem={renderReorderItem}
+                onDragEnd={onReorderDragEnd}
+                activationDistance={5}
+                contentContainerStyle={styles.reorderList}
+              />
+            </ReorderSheet>
+          </GestureHandlerRootView>
+        </SafeAreaProvider>
       </Modal>
     </View>
   );
