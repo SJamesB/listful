@@ -58,7 +58,7 @@ interface SearchResult {
 
 export type LibraryBookPageProps =
   | { title: string; mode: 'read'; status: 'to_read' | 'read' }
-  | { title: string; mode: 'favorites' };
+  | { title: string; mode: 'nine_club' };
 
 type Props = LibraryBookPageProps & { onEdgesChange?: EdgesChangeHandler };
 
@@ -152,7 +152,7 @@ export default function LibraryBookPage(props: Props) {
       .from('library_items')
       .select('id, title, author, year, cover_url, category, sort_order')
       .eq('category', category);
-    q = mode === 'favorites' ? q.eq('favorite', true) : q.eq('status', status!);
+    q = mode === 'nine_club' ? q.eq('nine_club', true) : q.eq('status', status!);
     const { data } = await q.order('sort_order', { ascending: false, nullsFirst: false });
     if (data) setItems(data as LibraryItem[]);
     setLoading(false);
@@ -273,9 +273,9 @@ export default function LibraryBookPage(props: Props) {
       category,
       sort_order: maxSortOrder + 1,
     };
-    if (mode === 'favorites') {
-      payload.favorite = true;
-      payload.favorite_added_at = now;
+    if (mode === 'nine_club') {
+      payload.nine_club = true;
+      payload.nine_club_added_at = now;
     } else {
       payload.status = status;
       payload.read_at = status === 'read' ? now : null;
@@ -311,10 +311,10 @@ export default function LibraryBookPage(props: Props) {
     load();
   };
 
-  const removeFromFavorites = async (item: LibraryItem) => {
+  const removeFromNineClub = async (item: LibraryItem) => {
     await supabase
       .from('library_items')
-      .update({ favorite: false, favorite_added_at: null })
+      .update({ nine_club: false, nine_club_added_at: null })
       .eq('id', item.id);
     setActionItem(null);
     load();
@@ -674,10 +674,10 @@ export default function LibraryBookPage(props: Props) {
             >
               <Text style={styles.actionBtnText}>Change cover</Text>
             </Pressable>
-            {mode === 'favorites' ? (
+            {mode === 'nine_club' ? (
               <Pressable
                 style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
-                onPress={() => actionItem && removeFromFavorites(actionItem)}
+                onPress={() => actionItem && removeFromNineClub(actionItem)}
               >
                 <Text style={styles.actionBtnText}>Remove from 9-Club</Text>
               </Pressable>
