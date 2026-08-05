@@ -15,6 +15,8 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
 import { supabase } from '@/lib/supabase';
@@ -38,6 +40,7 @@ interface VideogameItem {
   title: string;
   year: string | null;
   cover_url: string | null;
+  sort_order: number | null;
 }
 
 interface SearchResult {
@@ -100,19 +103,14 @@ export default function VideogamePosterPage(props: Props) {
   const [detailData, setDetailData] = useState<DetailData | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
+  const [reorderOpen, setReorderOpen] = useState(false);
+
   const load = useCallback(async () => {
     let q = supabase
       .from('videogame_items')
-      .select('id, igdb_id, title, year, cover_url');
-    let orderCol: string;
-    if (mode === 'nine_club') {
-      q = q.eq('nine_club', true);
-      orderCol = 'nine_club_added_at';
-    } else {
-      q = q.eq('status', status!);
-      orderCol = status === 'play' ? 'played_at' : 'added_at';
-    }
-    const { data } = await q.order(orderCol, { ascending: false });
+      .select('id, igdb_id, title, year, cover_url, sort_order');
+    q = mode === 'nine_club' ? q.eq('nine_club', true) : q.eq('status', status!);
+    const { data } = await q.order('sort_order', { ascending: false, nullsFirst: false });
     if (data) setItems(data as VideogameItem[]);
     setLoading(false);
   }, [mode, status]);
@@ -172,6 +170,10 @@ export default function VideogamePosterPage(props: Props) {
       year: result.year,
       cover_url: result.cover_url,
     };
+    if (!existingKeys.has(result.igdb_id)) {
+      const maxSortOrder = items.reduce((max, i) => (i.sort_order != null && i.sort_order > max ? i.sort_order : max), -1);
+      payload.sort_order = maxSortOrder + 1;
+    }
     if (mode === 'nine_club') {
       payload.nine_club = true;
       payload.nine_club_added_at = now;
@@ -239,6 +241,43 @@ export default function VideogamePosterPage(props: Props) {
     load();
   };
 
+  const openReorder = useCallback(() => setReorderOpen(true), []);
+  const closeReorder = useCallback(() => setReorderOpen(false), []);
+
+  const onReorderDragEnd = useCallback(async ({ data }: { data: VideogameItem[] }) => {
+    setItems(data);
+    const count = data.length;
+    await Promise.all(
+      data.map((item, index) =>
+        supabase.from('videogame_items').update({ sort_order: count - 1 - index }).eq('id', item.id),
+      ),
+    );
+  }, []);
+
+  const renderReorderItem = useCallback(
+    ({ item, drag, isActive }: RenderItemParams<VideogameItem>) => (
+      <ScaleDecorator>
+        <Pressable
+          onLongPress={drag}
+          delayLongPress={300}
+          disabled={isActive}
+          style={[styles.reorderRow, isActive && styles.reorderRowActive]}
+        >
+          {item.cover_url ? (
+            <Image source={{ uri: coverUri(item.cover_url)! }} style={styles.reorderThumb} contentFit="cover" />
+          ) : (
+            <View style={[styles.reorderThumb, styles.posterFallback]}>
+              <Text style={{ fontSize: 14 }}>🎮</Text>
+            </View>
+          )}
+          <Text style={styles.reorderTitle} numberOfLines={1}>{item.title}</Text>
+          <Text style={styles.dragHandleText}>⠿</Text>
+        </Pressable>
+      </ScaleDecorator>
+    ),
+    [],
+  );
+
   const renderItem = ({ item }: { item: VideogameItem }) => (
     <Pressable
       style={[styles.posterWrap, { width: posterWidth }]}
@@ -292,12 +331,21 @@ export default function VideogamePosterPage(props: Props) {
     <View style={styles.root}>
       <View style={styles.header}>
         <Text style={styles.title}>{title}</Text>
-        <Pressable
-          onPress={openSearch}
-          style={({ pressed }) => [styles.addBtn, { opacity: pressed ? 0.6 : 1 }]}
-        >
-          <Text style={styles.addBtnText}>+ Add</Text>
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable
+            onPress={openReorder}
+            disabled={items.length < 2}
+            style={({ pressed }) => [styles.reorderBtn, { opacity: pressed || items.length < 2 ? 0.4 : 1 }]}
+          >
+            <Text style={styles.reorderBtnText}>Reorder</Text>
+          </Pressable>
+          <Pressable
+            onPress={openSearch}
+            style={({ pressed }) => [styles.addBtn, { opacity: pressed ? 0.6 : 1 }]}
+          >
+            <Text style={styles.addBtnText}>+ Add</Text>
+          </Pressable>
+        </View>
       </View>
 
       {loading ? (
@@ -493,6 +541,27 @@ export default function VideogamePosterPage(props: Props) {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <Modal visible={reorderOpen} animationType="slide" transparent onRequestClose={closeReorder}>
+        <GestureHandlerRootView style={styles.reorderBackdrop}>
+          <View style={styles.reorderSheet}>
+            <View style={styles.reorderHeader}>
+              <Text style={styles.reorderHeading}>Reorder</Text>
+              <Pressable onPress={closeReorder} hitSlop={12}>
+                <Text style={styles.reorderDone}>Done</Text>
+              </Pressable>
+            </View>
+            <DraggableFlatList
+              data={items}
+              keyExtractor={(item) => item.id}
+              renderItem={renderReorderItem}
+              onDragEnd={onReorderDragEnd}
+              activationDistance={5}
+              contentContainerStyle={styles.reorderList}
+            />
+          </View>
+        </GestureHandlerRootView>
+      </Modal>
     </View>
   );
 }
@@ -513,6 +582,18 @@ const styles = StyleSheet.create({
     color: C.text,
     letterSpacing: -0.3,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  reorderBtn: {
+    paddingHorizontal: 4,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reorderBtnText: { color: C.accent, fontSize: 13, fontWeight: '600' },
   addBtn: {
     backgroundColor: C.accent,
     paddingHorizontal: 14,
@@ -729,5 +810,69 @@ const styles = StyleSheet.create({
   },
   actionBtnDanger: {
     color: C.danger,
+  },
+  // Reorder modal
+  reorderBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  reorderSheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '70%',
+    paddingBottom: 24,
+  },
+  reorderHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(26,22,38,0.08)',
+  },
+  reorderHeading: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: C.text,
+  },
+  reorderDone: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: C.accent,
+  },
+  reorderList: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+  },
+  reorderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    gap: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(26,22,38,0.08)',
+  },
+  reorderRowActive: {
+    opacity: 0.85,
+  },
+  reorderThumb: {
+    width: 32,
+    height: 48,
+    borderRadius: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reorderTitle: {
+    flex: 1,
+    fontSize: 15,
+    color: C.text,
+    fontWeight: '500',
+  },
+  dragHandleText: {
+    fontSize: 18,
+    color: C.muted,
   },
 });
