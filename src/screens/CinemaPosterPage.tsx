@@ -9,10 +9,13 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StyleProp,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
+  ViewStyle,
   useWindowDimensions,
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
@@ -47,6 +50,8 @@ interface CinemaItem {
   year: string | null;
   poster_path: string | null;
   sort_order: number | null;
+  status: 'to_watch' | 'watched' | null;
+  nine_club: boolean;
 }
 
 interface SearchResult {
@@ -84,6 +89,11 @@ const CATEGORY_EMOJI: Record<CinemaCategory, string> = {
   animation: '🎨',
 };
 
+const STATUS_OPTIONS: { key: 'to_watch' | 'watched'; label: string }[] = [
+  { key: 'to_watch', label: 'To Watch' },
+  { key: 'watched', label: 'Watched' },
+];
+
 // 'film' is a TMDB movie; 'tv' and 'animation' are both TMDB tv (animation is TV-only, e.g. anime).
 const tmdbTypeFor = (category: CinemaCategory): 'movie' | 'tv' => (category === 'film' ? 'movie' : 'tv');
 
@@ -99,13 +109,14 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function FilterRow<T extends string>({ options, active, onSelect }: {
+function FilterRow<T extends string>({ options, active, onSelect, style }: {
   options: { key: T; label: string }[];
   active: T;
   onSelect: (key: T) => void;
+  style?: StyleProp<ViewStyle>;
 }) {
   return (
-    <View style={styles.filterRow}>
+    <View style={[styles.filterRow, style]}>
       {options.map((o) => (
         <Pressable
           key={o.key}
@@ -158,7 +169,7 @@ export default function CinemaPosterPage(props: Props) {
   const load = useCallback(async () => {
     let q = supabase
       .from('cinema_items')
-      .select('id, tmdb_id, category, title, year, poster_path, sort_order')
+      .select('id, tmdb_id, category, title, year, poster_path, sort_order, status, nine_club')
       .eq('category', category);
     q = mode === 'nine_club' ? q.eq('nine_club', true) : q.eq('status', status!);
     const { data } = await q.order('sort_order', { ascending: false, nullsFirst: false });
@@ -230,6 +241,8 @@ export default function CinemaPosterPage(props: Props) {
     if (mode === 'nine_club') {
       payload.nine_club = true;
       payload.nine_club_added_at = now;
+      payload.status = 'watched';
+      payload.watched_at = now;
     } else {
       payload.status = status;
       payload.watched_at = status === 'watched' ? now : null;
@@ -241,27 +254,24 @@ export default function CinemaPosterPage(props: Props) {
     }
   };
 
-  const markWatched = async (item: CinemaItem) => {
-    await supabase
-      .from('cinema_items')
-      .update({ status: 'watched', watched_at: new Date().toISOString() })
-      .eq('id', item.id);
-    setActionItem(null);
-    load();
-  };
-
-  const moveToWatchlist = async (item: CinemaItem) => {
-    await supabase
-      .from('cinema_items')
-      .update({ status: 'to_watch', watched_at: null })
-      .eq('id', item.id);
-    setActionItem(null);
-    load();
-  };
-
   const removeItem = async (item: CinemaItem) => {
     await supabase.from('cinema_items').delete().eq('id', item.id);
     setActionItem(null);
+    load();
+  };
+
+  const updateItemCategory = async (item: CinemaItem, newCategory: CinemaCategory) => {
+    await supabase.from('cinema_items').update({ category: newCategory }).eq('id', item.id);
+    setActionItem((prev) => (prev ? { ...prev, category: newCategory } : prev));
+    load();
+  };
+
+  const updateItemStatus = async (item: CinemaItem, newStatus: 'to_watch' | 'watched') => {
+    await supabase
+      .from('cinema_items')
+      .update({ status: newStatus, watched_at: newStatus === 'watched' ? new Date().toISOString() : null })
+      .eq('id', item.id);
+    setActionItem((prev) => (prev ? { ...prev, status: newStatus } : prev));
     load();
   };
 
@@ -284,12 +294,12 @@ export default function CinemaPosterPage(props: Props) {
     setDetailData(null);
   }, []);
 
-  const removeFromNineClub = async (item: CinemaItem) => {
+  const toggleNineClub = async (item: CinemaItem, nineClub: boolean) => {
     await supabase
       .from('cinema_items')
-      .update({ nine_club: false, nine_club_added_at: null })
+      .update({ nine_club: nineClub, nine_club_added_at: nineClub ? new Date().toISOString() : null })
       .eq('id', item.id);
-    setActionItem(null);
+    setActionItem((prev) => (prev ? { ...prev, nine_club: nineClub } : prev));
     load();
   };
 
@@ -564,41 +574,43 @@ export default function CinemaPosterPage(props: Props) {
         <Pressable style={styles.actionOverlay} onPress={() => setActionItem(null)}>
           <Pressable style={styles.actionCard} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.actionTitle} numberOfLines={2}>{actionItem?.title}</Text>
-            {mode === 'nine_club' ? (
-              <Pressable
-                style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
-                onPress={() => actionItem && removeFromNineClub(actionItem)}
-              >
-                <Text style={styles.actionBtnText}>Remove from 9-Club</Text>
-              </Pressable>
-            ) : status === 'to_watch' ? (
-              <Pressable
-                style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
-                onPress={() => actionItem && markWatched(actionItem)}
-              >
-                <Text style={styles.actionBtnText}>Mark as watched</Text>
-              </Pressable>
-            ) : (
-              <Pressable
-                style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
-                onPress={() => actionItem && moveToWatchlist(actionItem)}
-              >
-                <Text style={styles.actionBtnText}>Move to Watchlist</Text>
-              </Pressable>
-            )}
-            {mode === 'watch' && (
-              <Pressable
-                style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
-                onPress={() => actionItem && removeItem(actionItem)}
-              >
-                <Text style={[styles.actionBtnText, styles.actionBtnDanger]}>Remove</Text>
-              </Pressable>
-            )}
+
+            <Text style={styles.editSectionLabel}>Category</Text>
+            <FilterRow
+              options={CATEGORIES}
+              active={actionItem?.category ?? 'film'}
+              onSelect={(c) => actionItem && updateItemCategory(actionItem, c)}
+              style={styles.editFilterRow}
+            />
+
+            <Text style={styles.editSectionLabel}>Status</Text>
+            <FilterRow
+              options={STATUS_OPTIONS}
+              active={actionItem?.status ?? 'to_watch'}
+              onSelect={(s) => actionItem && updateItemStatus(actionItem, s)}
+              style={styles.editFilterRow}
+            />
+
+            <View style={styles.switchRow}>
+              <Text style={styles.switchLabel}>In 9-Club</Text>
+              <Switch
+                value={!!actionItem?.nine_club}
+                onValueChange={(v) => { if (actionItem) toggleNineClub(actionItem, v); }}
+                trackColor={{ true: C.accent }}
+              />
+            </View>
+
+            <Pressable
+              style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
+              onPress={() => actionItem && removeItem(actionItem)}
+            >
+              <Text style={[styles.actionBtnText, styles.actionBtnDanger]}>Remove</Text>
+            </Pressable>
             <Pressable
               style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
               onPress={() => setActionItem(null)}
             >
-              <Text style={styles.actionBtnText}>Cancel</Text>
+              <Text style={styles.actionBtnText}>Done</Text>
             </Pressable>
           </Pressable>
         </Pressable>
@@ -879,6 +891,37 @@ const styles = StyleSheet.create({
     color: C.text,
     marginBottom: 8,
     textAlign: 'center',
+  },
+  editSectionLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: C.muted,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginTop: 8,
+    marginBottom: 6,
+  },
+  editFilterRow: {
+    paddingHorizontal: 0,
+    marginBottom: 4,
+    flexWrap: 'wrap',
+  },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    marginTop: 4,
+    marginBottom: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(26,22,38,0.08)',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(26,22,38,0.08)',
+  },
+  switchLabel: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: C.text,
   },
   actionBtn: {
     paddingVertical: 12,

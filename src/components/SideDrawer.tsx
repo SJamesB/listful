@@ -131,7 +131,7 @@ export function SideDrawer({
                 style={[styles.itemText, isActive('notes', item) && styles.itemTextActive]}
                 numberOfLines={1}
               >
-                📜 {item.label}
+                {item.label}
               </Text>
             </Pressable>
           ))}
