@@ -166,6 +166,9 @@ export default function LibraryBookPage(props: Props) {
   const [coverError, setCoverError] = useState<string | null>(null);
   const [coverResults, setCoverResults] = useState<SearchResult[]>([]);
 
+  const [coverUrlItem, setCoverUrlItem] = useState<LibraryItem | null>(null);
+  const [coverUrlInput, setCoverUrlInput] = useState('');
+
   const [detailItem, setDetailItem] = useState<LibraryItem | null>(null);
 
   const [reorderOpen, setReorderOpen] = useState(false);
@@ -243,6 +246,29 @@ export default function LibraryBookPage(props: Props) {
     setCoverQuery('');
     setCoverResults([]);
     setCoverError(null);
+  };
+
+  const openCoverUrlEditor = (item: LibraryItem) => {
+    setActionItem(null);
+    setCoverUrlItem(item);
+    setCoverUrlInput(item.cover_url ?? '');
+  };
+
+  const closeCoverUrlEditor = () => {
+    setCoverUrlItem(null);
+    setCoverUrlInput('');
+  };
+
+  const saveCoverUrl = async () => {
+    if (!coverUrlItem) return;
+    const { error } = await supabase
+      .from('library_items')
+      .update({ cover_url: coverUrlInput.trim() || null })
+      .eq('id', coverUrlItem.id);
+    if (!error) {
+      closeCoverUrlEditor();
+      load();
+    }
   };
 
   // Debounced cover search, scoped to the item being edited
@@ -642,6 +668,49 @@ export default function LibraryBookPage(props: Props) {
         </KeyboardAvoidingView>
       </Modal>
 
+      <Modal
+        visible={!!coverUrlItem}
+        animationType="fade"
+        transparent
+        presentationStyle="overFullScreen"
+        onRequestClose={closeCoverUrlEditor}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+        >
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle} numberOfLines={1}>
+                Cover URL: {coverUrlItem?.title}
+              </Text>
+              <Pressable onPress={closeCoverUrlEditor} hitSlop={8}>
+                <Text style={styles.doneText}>Cancel</Text>
+              </Pressable>
+            </View>
+            <TextInput
+              style={styles.modalInput}
+              value={coverUrlInput}
+              onChangeText={setCoverUrlInput}
+              placeholder="https://…"
+              placeholderTextColor={C.muted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+              returnKeyType="done"
+              onSubmitEditing={saveCoverUrl}
+              autoFocus
+            />
+            <Pressable
+              style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
+              onPress={saveCoverUrl}
+            >
+              <Text style={styles.actionBtnText}>Save</Text>
+            </Pressable>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       {/* Book detail modal */}
       <Modal
         visible={!!detailItem}
@@ -735,6 +804,12 @@ export default function LibraryBookPage(props: Props) {
               onPress={() => actionItem && openCoverPicker(actionItem)}
             >
               <Text style={styles.actionBtnText}>Change cover</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
+              onPress={() => actionItem && openCoverUrlEditor(actionItem)}
+            >
+              <Text style={styles.actionBtnText}>Set cover URL</Text>
             </Pressable>
             <Pressable
               style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
