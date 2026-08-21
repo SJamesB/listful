@@ -20,16 +20,6 @@ export const CATEGORIES = {
     accent: '#9333EA',
     tags: ['Headliner', 'Support', 'Festival', 'Music'],
   },
-  '📖 book': {
-    key: '📖 book',
-    title: '📖 Books',
-    titleLabel: 'Title',
-    subtitleLabel: 'Author',
-    gradient1: ['#FDBA74', '#F9A8D4', '#C4B5FD', '#FDE68A'],
-    gradient2: ['#FB7185', 'transparent', '#A78BFA'],
-    accent: '#DB2777',
-    tags: ['Fiction', 'Non-fiction', 'Sci-Fi', 'Graphic Novel', 'Modern Classic', 'Audiobook', 'Music'],
-  },
   '🍵 tea': {
     key: '🍵 tea',
     title: '🍵 Tea',
@@ -68,6 +58,21 @@ export const CATEGORIES = {
     tags: ['Bird', 'Land', 'Marine', 'Bird of Prey', 'Eagle', 'Mammal', 'Monkey', 'Fish', 'Shark', 'Whale', 'Reptile', 'Amphibian', 'Rodent', 'Spider', 'Tropical', 'Woodpecker', 'Owl', 'Ray'],
   },
 } satisfies Record<string, CategoryConfig>;
+
+// Display order for Vault sections. Unknown categories are appended
+// alphabetically after these.
+const CATEGORY_ORDER = ['🎤 gig', '🍵 tea', '🌶️ chilli', '🐸 wildlife', '🌍 countries'];
+
+export function sortCategoryKeys(keys: string[]): string[] {
+  return [...keys].sort((a, b) => {
+    const ai = CATEGORY_ORDER.indexOf(a);
+    const bi = CATEGORY_ORDER.indexOf(b);
+    if (ai !== -1 && bi !== -1) return ai - bi;
+    if (ai !== -1) return -1;
+    if (bi !== -1) return 1;
+    return a.localeCompare(b);
+  });
+}
 
 // Fallback palettes cycled for unknown categories
 const FALLBACK_PALETTES: Array<{

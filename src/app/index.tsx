@@ -7,12 +7,11 @@ import { SectionPager, type SectionItem, type SectionPagerHandle } from '@/compo
 import { SideDrawer } from '@/components/SideDrawer';
 import {
   VerticalSectionPager,
-  type EdgeState,
   type SectionDef,
   type VerticalSectionPagerHandle,
 } from '@/components/VerticalSectionPager';
 import type { EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
-import { makeConfig, type CategoryConfig } from '@/lib/logCategories';
+import { makeConfig, sortCategoryKeys, type CategoryConfig } from '@/lib/logCategories';
 import { supabase } from '@/lib/supabase';
 import { LogPage } from '@/screens/LogPage';
 import NotesPage, { type Note, type NotesPageHandle } from '@/screens/NotesPage';
@@ -49,6 +48,11 @@ const VIDEOGAMES_BG = {
 };
 
 export type Section = 'organise' | 'vault' | 'notes' | 'cinema' | 'library' | 'videogames';
+
+interface EdgeState {
+  atTop: boolean;
+  atBottom: boolean;
+}
 
 // Vertical scroll order between sections — matches the side drawer's order.
 const SECTION_ORDER: Section[] = ['organise', 'notes', 'vault', 'cinema', 'library', 'videogames'];
@@ -136,7 +140,7 @@ export default function App() {
       .select('category')
       .then(({ data }) => {
         if (!data) return;
-        const keys = [...new Set(data.map((r) => r.category as string))].sort();
+        const keys = sortCategoryKeys([...new Set(data.map((r) => r.category as string))]);
         setVaultConfigs(keys.map(makeConfig));
       });
   }, []);
@@ -381,7 +385,6 @@ export default function App() {
               sections={sections}
               activeIndex={sectionIndex}
               onActiveIndexChange={setSectionIndex}
-              edgesRef={edgesRef}
               width={width}
               height={pagerHeight}
             />
