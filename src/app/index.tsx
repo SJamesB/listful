@@ -16,6 +16,8 @@ import { supabase } from '@/lib/supabase';
 import { LogPage } from '@/screens/LogPage';
 import NotesPage, { type Note, type NotesPageHandle } from '@/screens/NotesPage';
 import CinemaPosterPage, { type CinemaPosterPageProps } from '@/screens/CinemaPosterPage';
+import DeadheadShowsPage from '@/screens/DeadheadShowsPage';
+import DeadheadStatsPage from '@/screens/DeadheadStatsPage';
 import LibraryBookPage, { type LibraryBookPageProps } from '@/screens/LibraryBookPage';
 import VideogamePosterPage, { type VideogamePosterPageProps } from '@/screens/VideogamePosterPage';
 import EntertainmentPage from '@/screens/entertainment';
@@ -46,8 +48,12 @@ const VIDEOGAMES_BG = {
   layer1: ['#C7D2FE', '#A5B4FC', '#818CF8', '#C7D2FE'] as const,
   layer2: ['#818CF8', 'transparent', '#4F46E5'] as const,
 };
+const DEADHEAD_BG = {
+  layer1: ['#FEE2C7', '#FCA5A5', '#FDBA74', '#FEE2C7'] as const,
+  layer2: ['#F97316', 'transparent', '#DC2626'] as const,
+};
 
-export type Section = 'organise' | 'vault' | 'notes' | 'cinema' | 'library' | 'videogames';
+export type Section = 'organise' | 'vault' | 'notes' | 'cinema' | 'library' | 'videogames' | 'deadhead';
 
 interface EdgeState {
   atTop: boolean;
@@ -55,7 +61,7 @@ interface EdgeState {
 }
 
 // Vertical scroll order between sections — matches the side drawer's order.
-const SECTION_ORDER: Section[] = ['organise', 'notes', 'vault', 'cinema', 'library', 'videogames'];
+const SECTION_ORDER: Section[] = ['organise', 'notes', 'vault', 'cinema', 'library', 'videogames', 'deadhead'];
 
 const CINEMA_MENU_ITEMS = [
   { localIndex: 0, label: '🍿 Watchlist' },
@@ -73,6 +79,11 @@ const VIDEOGAMES_MENU_ITEMS = [
   { localIndex: 0, label: '🎮 Backlog' },
   { localIndex: 1, label: '🕹️ Played' },
   { localIndex: 2, label: '🏆 9-Club' },
+];
+
+const DEADHEAD_MENU_ITEMS = [
+  { localIndex: 0, label: '🌹 Shows' },
+  { localIndex: 1, label: '📊 Stats' },
 ];
 
 function HamburgerIcon() {
@@ -96,7 +107,7 @@ export default function App() {
   const [vaultConfigs, setVaultConfigs] = useState<CategoryConfig[]>([]);
   const [notesList, setNotesList] = useState<Note[]>([]);
   const [sectionIndex, setSectionIndex] = useState(0);
-  const [sectionPage, setSectionPage] = useState({ organise: 0, vault: 0, notes: 0, cinema: 0, library: 0, videogames: 0 });
+  const [sectionPage, setSectionPage] = useState({ organise: 0, vault: 0, notes: 0, cinema: 0, library: 0, videogames: 0, deadhead: 0 });
   const [pagerHeight, setPagerHeight] = useState(0);
 
   const currentSection = SECTION_ORDER[sectionIndex];
@@ -108,6 +119,7 @@ export default function App() {
   const cinemaRef = useRef<SectionPagerHandle>(null);
   const libraryRef = useRef<SectionPagerHandle>(null);
   const videogamesRef = useRef<SectionPagerHandle>(null);
+  const deadheadRef = useRef<SectionPagerHandle>(null);
 
   // Tracks whether each section's content is scrolled to its top/bottom edge,
   // so the vertical pager knows when it's safe to take over a vertical drag.
@@ -119,6 +131,7 @@ export default function App() {
     cinema: { atTop: true, atBottom: true },
     library: { atTop: true, atBottom: true },
     videogames: { atTop: true, atBottom: true },
+    deadhead: { atTop: true, atBottom: true },
   });
 
   const onEdgesChange = useMemo(() => {
@@ -131,6 +144,7 @@ export default function App() {
       cinema: make('cinema'),
       library: make('library'),
       videogames: make('videogames'),
+      deadhead: make('deadhead'),
     };
   }, []);
 
@@ -142,6 +156,20 @@ export default function App() {
         if (!data) return;
         const keys = sortCategoryKeys([...new Set(data.map((r) => r.category as string))]);
         setVaultConfigs(keys.map(makeConfig));
+      });
+  }, []);
+
+  // Fetched independently of NotesPage mounting — the vertical pager only
+  // renders the active section, so the drawer's Notes list would otherwise
+  // stay empty until the user actually swipes to Notes at least once.
+  useEffect(() => {
+    supabase
+      .from('notes')
+      .select('*')
+      .order('sort_order', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: true })
+      .then(({ data }) => {
+        if (data) setNotesList(data);
       });
   }, []);
 
@@ -225,6 +253,11 @@ export default function App() {
     getVideogamesComponent('nineClub', { title: '🏆 9-Club',  mode: 'nine_club'                     }),
   ], [getVideogamesComponent]);
 
+  const deadheadData = useMemo<SectionItem[]>(() => [
+    { id: 'shows', Component: DeadheadShowsPage },
+    { id: 'stats', Component: DeadheadStatsPage },
+  ], []);
+
   const organiseData = useMemo<SectionItem[]>(() => [
     { id: 'habits',        Component: HabitsPage },
     { id: 'todo',          Component: TodoPage },
@@ -257,6 +290,7 @@ export default function App() {
     currentSection === 'cinema'     ? CINEMA_BG :
     currentSection === 'library'    ? LIBRARY_BG :
     currentSection === 'videogames' ? VIDEOGAMES_BG :
+    currentSection === 'deadhead'   ? DEADHEAD_BG :
     NOTES_BG;
 
   const vaultMenuItems = useMemo(
@@ -282,6 +316,7 @@ export default function App() {
       section === 'cinema'     ? cinemaRef :
       section === 'library'    ? libraryRef :
       section === 'videogames' ? videogamesRef :
+      section === 'deadhead'   ? deadheadRef :
       null;
     ref?.current?.scrollToIndex(localIndex);
 
@@ -369,6 +404,20 @@ export default function App() {
         />
       ),
     },
+    {
+      key: 'deadhead',
+      render: () => (
+        <SectionPager
+          ref={deadheadRef}
+          data={deadheadData}
+          width={width}
+          height={pagerHeight}
+          initialIndex={sectionPage.deadhead}
+          onPageChange={(i) => setSectionPage((p) => ({ ...p, deadhead: i }))}
+          onEdgesChange={onEdgesChange.deadhead}
+        />
+      ),
+    },
   ];
 
   return (
@@ -413,6 +462,7 @@ export default function App() {
         cinemaPages={CINEMA_MENU_ITEMS}
         libraryPages={LIBRARY_MENU_ITEMS}
         videogamePages={VIDEOGAMES_MENU_ITEMS}
+        deadheadPages={DEADHEAD_MENU_ITEMS}
       />
     </View>
   );

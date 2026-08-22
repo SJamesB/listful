@@ -1,0 +1,3 @@
+ALTER TABLE public.dead_shows
+  ADD COLUMN listened BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN favourite BOOLEAN NOT NULL DEFAULT false;
