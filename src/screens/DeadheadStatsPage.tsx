@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 
+import DeadheadShowDetailModal from '@/components/DeadheadShowDetailModal';
 import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
 import { supabase } from '@/lib/supabase';
 
@@ -63,22 +64,36 @@ interface SongStats {
   timesPlayed: number;
   firstDate: string;
   firstLocation: string;
+  firstShowId: string | null;
   lastDate: string;
   lastLocation: string;
+  lastShowId: string | null;
   longestDisplay: string;
   longestDate: string;
   longestLocation: string;
+  longestShowId: string | null;
   medianDisplay: string;
 }
 
-function StatRow({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <View style={styles.statRow}>
+function StatRow({ label, value, sub, onPress }: { label: string; value: string; sub?: string; onPress?: () => void }) {
+  const content = (
+    <>
       <Text style={styles.statLabel}>{label}</Text>
-      <Text style={styles.statValue}>{value}</Text>
+      <Text style={[styles.statValue, onPress && styles.statValueLink]}>{value}</Text>
       {sub ? <Text style={styles.statSub}>{sub}</Text> : null}
-    </View>
+    </>
   );
+  if (onPress) {
+    return (
+      <Pressable
+        style={({ pressed }) => [styles.statRow, pressed && styles.statRowPressed]}
+        onPress={onPress}
+      >
+        {content}
+      </Pressable>
+    );
+  }
+  return <View style={styles.statRow}>{content}</View>;
 }
 
 export default function DeadheadStatsPage({ onEdgesChange }: { onEdgesChange?: EdgesChangeHandler }) {
@@ -88,9 +103,26 @@ export default function DeadheadStatsPage({ onEdgesChange }: { onEdgesChange?: E
   const [suggestions, setSuggestions] = useState<SongSuggestion[]>([]);
   const [searching, setSearching] = useState(false);
 
+  const [allSongs, setAllSongs] = useState<SongSuggestion[]>([]);
+  const [allSongsLoading, setAllSongsLoading] = useState(true);
+
   const [selected, setSelected] = useState<string | null>(null);
   const [stats, setStats] = useState<SongStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
+
+  const [detailShowId, setDetailShowId] = useState<string | null>(null);
+
+  useEffect(() => {
+    supabase
+      .from('dead_songs')
+      .select('title, times_played')
+      .order('times_played', { ascending: false })
+      .limit(2000)
+      .then(({ data }) => {
+        setAllSongs((data ?? []) as SongSuggestion[]);
+        setAllSongsLoading(false);
+      });
+  }, []);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -122,7 +154,8 @@ export default function DeadheadStatsPage({ onEdgesChange }: { onEdgesChange?: E
       const { data } = await supabase
         .from('dead_tracks')
         .select('length_seconds, length_display, show_id, dead_shows(date, venue, city, state)')
-        .ilike('normalized_title', title);
+        .contains('song_titles_lower', [title.toLowerCase()])
+        .limit(5000);
       const rows = (data ?? []) as unknown as TrackRow[];
       if (rows.length === 0) {
         setStats(null);
@@ -149,11 +182,14 @@ export default function DeadheadStatsPage({ onEdgesChange }: { onEdgesChange?: E
         timesPlayed: rows.length,
         firstDate: first ? formatDate(first.dead_shows!.date) : '—',
         firstLocation: first ? formatLocation(first.dead_shows!) : '',
+        firstShowId: first?.show_id ?? null,
         lastDate: last ? formatDate(last.dead_shows!.date) : '—',
         lastLocation: last ? formatLocation(last.dead_shows!) : '',
+        lastShowId: last?.show_id ?? null,
         longestDisplay: longest ? (longest.length_display ?? formatSeconds(longest.seconds)) : '—',
         longestDate: longest?.dead_shows ? formatDate(longest.dead_shows.date) : '',
         longestLocation: longest?.dead_shows ? formatLocation(longest.dead_shows) : '',
+        longestShowId: longest?.show_id ?? null,
         medianDisplay: median != null ? formatSeconds(median) : '—',
       });
     } finally {
@@ -208,6 +244,23 @@ export default function DeadheadStatsPage({ onEdgesChange }: { onEdgesChange?: E
         />
       ) : !selected && query.trim() ? (
         <Text style={styles.emptyText}>No songs match</Text>
+      ) : !selected && allSongsLoading ? (
+        <ActivityIndicator color={C.accent} style={{ marginTop: 12 }} />
+      ) : !selected ? (
+        <FlatList
+          data={allSongs}
+          keyExtractor={(item) => item.title}
+          contentContainerStyle={styles.suggestList}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          {...edgeScroll}
+          renderItem={({ item }) => (
+            <Pressable style={styles.suggestRow} onPress={() => selectSong(item.title)}>
+              <Text style={styles.suggestTitle}>{item.title}</Text>
+              <Text style={styles.suggestCount}>{item.times_played}×</Text>
+            </Pressable>
+          )}
+        />
       ) : null}
 
       {selected && (
@@ -222,12 +275,23 @@ export default function DeadheadStatsPage({ onEdgesChange }: { onEdgesChange?: E
             <>
               <Text style={styles.songTitle}>{stats.title}</Text>
               <StatRow label="Times Played" value={String(stats.timesPlayed)} />
-              <StatRow label="First Played" value={stats.firstDate} sub={stats.firstLocation} />
-              <StatRow label="Last Played" value={stats.lastDate} sub={stats.lastLocation} />
+              <StatRow
+                label="First Played"
+                value={stats.firstDate}
+                sub={stats.firstLocation}
+                onPress={stats.firstShowId ? () => setDetailShowId(stats.firstShowId) : undefined}
+              />
+              <StatRow
+                label="Last Played"
+                value={stats.lastDate}
+                sub={stats.lastLocation}
+                onPress={stats.lastShowId ? () => setDetailShowId(stats.lastShowId) : undefined}
+              />
               <StatRow
                 label="Longest Version"
                 value={stats.longestDisplay}
                 sub={[stats.longestDate, stats.longestLocation].filter(Boolean).join(' — ')}
+                onPress={stats.longestShowId ? () => setDetailShowId(stats.longestShowId) : undefined}
               />
               <StatRow label="Median Length" value={stats.medianDisplay} />
             </>
@@ -236,6 +300,11 @@ export default function DeadheadStatsPage({ onEdgesChange }: { onEdgesChange?: E
           )}
         </ScrollView>
       )}
+
+      <DeadheadShowDetailModal
+        showId={detailShowId}
+        onClose={() => setDetailShowId(null)}
+      />
     </View>
   );
 }
@@ -310,6 +379,7 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(26,22,38,0.08)',
     gap: 3,
   },
+  statRowPressed: { opacity: 0.6 },
   statLabel: {
     fontSize: 10,
     color: C.muted,
@@ -321,6 +391,9 @@ const styles = StyleSheet.create({
     fontSize: 17,
     color: C.text,
     fontWeight: '600',
+  },
+  statValueLink: {
+    color: C.accent,
   },
   statSub: {
     fontSize: 13,

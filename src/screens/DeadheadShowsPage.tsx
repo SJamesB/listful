@@ -1,18 +1,15 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
 } from 'react-native';
 
+import DeadheadShowDetailModal from '@/components/DeadheadShowDetailModal';
 import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
 import { supabase } from '@/lib/supabase';
 
@@ -61,27 +58,6 @@ interface DeadShow {
   favourite: boolean;
 }
 
-interface DeadShowDetail {
-  lineup_era: string | null;
-  lineup_members: string | null;
-}
-
-interface DeadTrack {
-  id: number;
-  track_number: number | null;
-  title: string;
-  length_display: string | null;
-}
-
-function DetailRow({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.detailRow}>
-      <Text style={styles.detailLabel}>{label}</Text>
-      <Text style={styles.detailValue}>{value}</Text>
-    </View>
-  );
-}
-
 export default function DeadheadShowsPage({ onEdgesChange }: { onEdgesChange?: EdgesChangeHandler }) {
   const edgeScroll = useSectionEdgeScroll(onEdgesChange);
 
@@ -91,16 +67,14 @@ export default function DeadheadShowsPage({ onEdgesChange }: { onEdgesChange?: E
   const [onlyListened, setOnlyListened] = useState(false);
   const [onlyFavourite, setOnlyFavourite] = useState(false);
 
-  const [detailItem, setDetailItem] = useState<DeadShow | null>(null);
-  const [detailInfo, setDetailInfo] = useState<DeadShowDetail | null>(null);
-  const [tracks, setTracks] = useState<DeadTrack[]>([]);
-  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailShowId, setDetailShowId] = useState<string | null>(null);
 
   useEffect(() => {
     supabase
       .from('dead_shows')
       .select('show_id, date, venue, city, state, country, listened, favourite')
       .order('date', { ascending: true })
+      .limit(5000)
       .then(({ data }) => {
         if (data) setItems(data as DeadShow[]);
         setLoading(false);
@@ -117,40 +91,17 @@ export default function DeadheadShowsPage({ onEdgesChange }: { onEdgesChange?: E
     });
   }, [items, query, onlyListened, onlyFavourite]);
 
-  const openDetail = useCallback(async (item: DeadShow) => {
-    setDetailItem(item);
-    setDetailInfo(null);
-    setTracks([]);
-    setDetailLoading(true);
-    try {
-      const [{ data: showData }, { data: trackData }] = await Promise.all([
-        supabase.from('dead_shows').select('lineup_era, lineup_members').eq('show_id', item.show_id).single(),
-        supabase.from('dead_tracks').select('id, track_number, title, length_display').eq('show_id', item.show_id).order('track_number', { ascending: true }),
-      ]);
-      if (showData) setDetailInfo(showData as DeadShowDetail);
-      if (trackData) setTracks(trackData as DeadTrack[]);
-    } finally {
-      setDetailLoading(false);
-    }
+  const openDetail = useCallback((item: DeadShow) => {
+    setDetailShowId(item.show_id);
   }, []);
 
   const closeDetail = useCallback(() => {
-    setDetailItem(null);
-    setDetailInfo(null);
-    setTracks([]);
+    setDetailShowId(null);
   }, []);
 
-  const toggleListened = async (item: DeadShow, listened: boolean) => {
-    await supabase.from('dead_shows').update({ listened }).eq('show_id', item.show_id);
-    setItems((prev) => prev.map((i) => (i.show_id === item.show_id ? { ...i, listened } : i)));
-    setDetailItem((prev) => (prev ? { ...prev, listened } : prev));
-  };
-
-  const toggleFavourite = async (item: DeadShow, favourite: boolean) => {
-    await supabase.from('dead_shows').update({ favourite }).eq('show_id', item.show_id);
-    setItems((prev) => prev.map((i) => (i.show_id === item.show_id ? { ...i, favourite } : i)));
-    setDetailItem((prev) => (prev ? { ...prev, favourite } : prev));
-  };
+  const handleDetailChange = useCallback((showId: string, patch: Partial<Pick<DeadShow, 'listened' | 'favourite'>>) => {
+    setItems((prev) => prev.map((i) => (i.show_id === showId ? { ...i, ...patch } : i)));
+  }, []);
 
   const renderItem = ({ item }: { item: DeadShow }) => (
     <Pressable
@@ -219,75 +170,11 @@ export default function DeadheadShowsPage({ onEdgesChange }: { onEdgesChange?: E
         />
       )}
 
-      <Modal
-        visible={!!detailItem}
-        animationType="fade"
-        transparent
-        presentationStyle="overFullScreen"
-        onRequestClose={closeDetail}
-      >
-        <View style={styles.detailOverlay}>
-          <LinearGradient
-            colors={['rgba(8,8,8,0.1)', '#080808']}
-            locations={[0, 0.5]}
-            style={StyleSheet.absoluteFill}
-          />
-          <Pressable style={styles.detailClose} onPress={closeDetail} hitSlop={12}>
-            <Text style={styles.detailCloseText}>✕</Text>
-          </Pressable>
-          <ScrollView
-            style={{ flex: 1 }}
-            contentContainerStyle={styles.detailContent}
-            showsVerticalScrollIndicator={false}
-          >
-            <Text style={styles.detailTitle}>{detailItem ? formatDate(detailItem.date) : ''}</Text>
-            <Text style={styles.detailMetaText}>{detailItem ? formatLocation(detailItem) : ''}</Text>
-
-            <View style={styles.switchRow}>
-              <Text style={styles.switchLabel}>Listened</Text>
-              <Switch
-                value={!!detailItem?.listened}
-                onValueChange={(v) => { if (detailItem) toggleListened(detailItem, v); }}
-                trackColor={{ true: C.accent }}
-              />
-            </View>
-            <View style={styles.switchRow}>
-              <Text style={styles.switchLabel}>Favourite</Text>
-              <Switch
-                value={!!detailItem?.favourite}
-                onValueChange={(v) => { if (detailItem) toggleFavourite(detailItem, v); }}
-                trackColor={{ true: C.accent }}
-              />
-            </View>
-
-            {detailLoading ? (
-              <ActivityIndicator color="rgba(255,255,255,0.35)" style={{ marginTop: 20 }} />
-            ) : (
-              <>
-                {(detailInfo?.lineup_era || detailInfo?.lineup_members) && (
-                  <View style={styles.detailFields}>
-                    {detailInfo?.lineup_era ? <DetailRow label="Lineup Era" value={detailInfo.lineup_era} /> : null}
-                    {detailInfo?.lineup_members ? <DetailRow label="Lineup" value={detailInfo.lineup_members} /> : null}
-                  </View>
-                )}
-
-                {tracks.length > 0 && (
-                  <View style={styles.tracklist}>
-                    <Text style={styles.tracklistHeading}>Tracklist</Text>
-                    {tracks.map((track, i) => (
-                      <View key={track.id} style={styles.trackRow}>
-                        <Text style={styles.trackNumber}>{track.track_number ?? i + 1}</Text>
-                        <Text style={styles.trackTitle} numberOfLines={2}>{track.title}</Text>
-                        <Text style={styles.trackLength}>{track.length_display ?? ''}</Text>
-                      </View>
-                    ))}
-                  </View>
-                )}
-              </>
-            )}
-          </ScrollView>
-        </View>
-      </Modal>
+      <DeadheadShowDetailModal
+        showId={detailShowId}
+        onClose={closeDetail}
+        onChange={handleDetailChange}
+      />
     </View>
   );
 }
@@ -358,118 +245,4 @@ const styles = StyleSheet.create({
   rowLocation: { fontSize: 13, color: C.muted },
   rowBadges: { flexDirection: 'row', gap: 8 },
   badgeText: { fontSize: 14, color: '#D97706' },
-  // Detail modal
-  detailOverlay: {
-    flex: 1,
-    backgroundColor: '#080808',
-  },
-  detailClose: {
-    position: 'absolute',
-    top: 56,
-    right: 20,
-    zIndex: 10,
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  detailCloseText: {
-    color: 'rgba(255,255,255,0.65)',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  detailContent: {
-    paddingTop: 72,
-    paddingHorizontal: 28,
-    paddingBottom: 64,
-  },
-  detailTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#fff',
-    textAlign: 'center',
-    letterSpacing: -0.4,
-    marginBottom: 8,
-  },
-  detailMetaText: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.5)',
-    fontWeight: '500',
-    textAlign: 'center',
-    marginBottom: 24,
-  },
-  switchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    paddingHorizontal: 2,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.1)',
-  },
-  switchLabel: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: '#fff',
-  },
-  detailFields: {
-    marginTop: 20,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.07)',
-  },
-  detailRow: {
-    flexDirection: 'column',
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.07)',
-    gap: 4,
-  },
-  detailLabel: {
-    fontSize: 10,
-    color: 'rgba(255,255,255,0.3)',
-    fontWeight: '600',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-  },
-  detailValue: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.82)',
-    fontWeight: '500',
-    lineHeight: 20,
-  },
-  tracklist: {
-    marginTop: 24,
-  },
-  tracklistHeading: {
-    fontSize: 11,
-    color: 'rgba(255,255,255,0.3)',
-    fontWeight: '600',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-    marginBottom: 8,
-  },
-  trackRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
-    gap: 10,
-  },
-  trackNumber: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.35)',
-    width: 20,
-  },
-  trackTitle: {
-    flex: 1,
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.85)',
-  },
-  trackLength: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.4)',
-  },
 });
