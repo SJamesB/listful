@@ -11,7 +11,7 @@ import {
 
 import DeadheadShowDetailModal from '@/components/DeadheadShowDetailModal';
 import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
-import { supabase } from '@/lib/supabase';
+import { fetchAllRows, supabase } from '@/lib/supabase';
 
 const C = {
   text: '#1A1626',
@@ -70,15 +70,16 @@ export default function DeadheadShowsPage({ onEdgesChange }: { onEdgesChange?: E
   const [detailShowId, setDetailShowId] = useState<string | null>(null);
 
   useEffect(() => {
-    supabase
-      .from('dead_shows')
-      .select('show_id, date, venue, city, state, country, listened, favourite')
-      .order('date', { ascending: true })
-      .limit(5000)
-      .then(({ data }) => {
-        if (data) setItems(data as DeadShow[]);
-        setLoading(false);
-      });
+    fetchAllRows<DeadShow>((from, to) =>
+      supabase
+        .from('dead_shows')
+        .select('show_id, date, venue, city, state, country, listened, favourite')
+        .order('date', { ascending: true })
+        .range(from, to),
+    ).then((data) => {
+      setItems(data);
+      setLoading(false);
+    });
   }, []);
 
   const filtered = useMemo(() => {
