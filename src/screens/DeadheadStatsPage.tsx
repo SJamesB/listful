@@ -12,7 +12,7 @@ import {
 
 import DeadheadShowDetailModal from '@/components/DeadheadShowDetailModal';
 import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
-import { supabase } from '@/lib/supabase';
+import { fetchAllRows, supabase } from '@/lib/supabase';
 
 const C = {
   text: '#1A1626',
@@ -113,15 +113,17 @@ export default function DeadheadStatsPage({ onEdgesChange }: { onEdgesChange?: E
   const [detailShowId, setDetailShowId] = useState<string | null>(null);
 
   useEffect(() => {
-    supabase
-      .from('dead_songs')
-      .select('title, times_played')
-      .order('times_played', { ascending: false })
-      .limit(2000)
-      .then(({ data }) => {
-        setAllSongs((data ?? []) as SongSuggestion[]);
-        setAllSongsLoading(false);
-      });
+    fetchAllRows<SongSuggestion>((from, to) =>
+      supabase
+        .from('dead_songs')
+        .select('title, times_played')
+        .order('times_played', { ascending: false })
+        .order('title', { ascending: true })
+        .range(from, to),
+    ).then((data) => {
+      setAllSongs(data);
+      setAllSongsLoading(false);
+    });
   }, []);
 
   useEffect(() => {
@@ -151,12 +153,14 @@ export default function DeadheadStatsPage({ onEdgesChange }: { onEdgesChange?: E
     setStats(null);
     setStatsLoading(true);
     try {
-      const { data } = await supabase
-        .from('dead_tracks')
-        .select('length_seconds, length_display, show_id, dead_shows(date, venue, city, state)')
-        .contains('song_titles_lower', [title.toLowerCase()])
-        .limit(5000);
-      const rows = (data ?? []) as unknown as TrackRow[];
+      const rows = await fetchAllRows<TrackRow>((from, to) =>
+        supabase
+          .from('dead_tracks')
+          .select('length_seconds, length_display, show_id, dead_shows(date, venue, city, state)')
+          .contains('song_titles_lower', [title.toLowerCase()])
+          .order('id', { ascending: true })
+          .range(from, to) as unknown as PromiseLike<{ data: TrackRow[] | null }>,
+      );
       if (rows.length === 0) {
         setStats(null);
         return;
