@@ -2,7 +2,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -307,28 +309,33 @@ export default function DeadheadShowDetailModal({ showId, onClose, onChange }: D
 
       <Modal visible={editOpen} animationType="slide" transparent onRequestClose={closeEdit}>
         <SafeAreaProvider>
-          <GestureHandlerRootView style={styles.editBackdrop}>
-            <EditTrackSheet>
-              <View style={styles.editHeader}>
-                <Text style={styles.editHeading}>Edit Tracklist</Text>
-                <Pressable onPress={closeEdit} hitSlop={12}>
-                  <Text style={styles.editDone}>Done</Text>
-                </Pressable>
-              </View>
-              <DraggableFlatList
-                data={tracks}
-                keyExtractor={(item) => String(item.id)}
-                renderItem={renderEditTrackItem}
-                onDragEnd={onTracksDragEnd}
-                activationDistance={5}
-                contentContainerStyle={styles.editList}
-                ListFooterComponent={
-                  <Pressable style={styles.addTrackBtn} onPress={addTrack}>
-                    <Text style={styles.addTrackText}>+ Add Track</Text>
+          <GestureHandlerRootView style={{ flex: 1 }}>
+            <KeyboardAvoidingView
+              style={styles.editBackdrop}
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            >
+              <EditTrackSheet>
+                <View style={styles.editHeader}>
+                  <Text style={styles.editHeading}>Edit Tracklist</Text>
+                  <Pressable onPress={closeEdit} hitSlop={12}>
+                    <Text style={styles.editDone}>Done</Text>
                   </Pressable>
-                }
-              />
-            </EditTrackSheet>
+                </View>
+                <DraggableFlatList
+                  data={tracks}
+                  keyExtractor={(item) => String(item.id)}
+                  renderItem={renderEditTrackItem}
+                  onDragEnd={onTracksDragEnd}
+                  activationDistance={5}
+                  contentContainerStyle={styles.editList}
+                  ListFooterComponent={
+                    <Pressable style={styles.addTrackBtn} onPress={addTrack}>
+                      <Text style={styles.addTrackText}>+ Add Track</Text>
+                    </Pressable>
+                  }
+                />
+              </EditTrackSheet>
+            </KeyboardAvoidingView>
           </GestureHandlerRootView>
         </SafeAreaProvider>
       </Modal>
