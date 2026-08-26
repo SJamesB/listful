@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -96,7 +96,12 @@ function StatRow({ label, value, sub, onPress }: { label: string; value: string;
   return <View style={styles.statRow}>{content}</View>;
 }
 
-export default function DeadheadStatsPage({ onEdgesChange }: { onEdgesChange?: EdgesChangeHandler }) {
+export interface DeadheadStatsPageHandle {
+  selectSong: (title: string) => void;
+}
+
+const DeadheadStatsPage = forwardRef<DeadheadStatsPageHandle, { onEdgesChange?: EdgesChangeHandler }>(
+  function DeadheadStatsPage({ onEdgesChange }, ref) {
   const edgeScroll = useSectionEdgeScroll(onEdgesChange);
 
   const [query, setQuery] = useState('');
@@ -207,6 +212,8 @@ export default function DeadheadStatsPage({ onEdgesChange }: { onEdgesChange?: E
     setQuery('');
   };
 
+  useImperativeHandle(ref, () => ({ selectSong }), [selectSong]);
+
   return (
     <View style={styles.root}>
       <View style={styles.header}>
@@ -311,7 +318,10 @@ export default function DeadheadStatsPage({ onEdgesChange }: { onEdgesChange?: E
       />
     </View>
   );
-}
+  },
+);
+
+export default DeadheadStatsPage;
 
 const styles = StyleSheet.create({
   root: { flex: 1 },

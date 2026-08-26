@@ -29,6 +29,7 @@ const MONTHS = [
 ];
 
 const TRACK_FIELD_DEBOUNCE_MS = 600;
+const NOTES_DEBOUNCE_MS = 600;
 
 function formatDate(iso: string): string {
   const [y, m, d] = iso.split('-').map(Number);
@@ -39,6 +40,12 @@ function formatLocation(show: { venue: string | null; city: string | null; state
   const place = [show.city, show.state].filter(Boolean).join(', ');
   if (show.venue && place) return `${show.venue} — ${place}`;
   return show.venue || place || show.country || 'Unknown location';
+}
+
+// Splits a (possibly segued) track title like "Drums > Space" into its
+// individual song names, for linking each one to its own stats.
+function splitSongTitle(title: string): string[] {
+  return title.split('>').map((s) => s.trim()).filter(Boolean);
 }
 
 // Accepts "ss", "m:ss" or "h:mm:ss" and returns the total seconds, or null if
@@ -62,6 +69,7 @@ interface DeadShowInfo {
   favourite: boolean;
   lineup_era: string | null;
   lineup_members: string | null;
+  notes: string | null;
 }
 
 interface DeadTrack {
@@ -98,15 +106,17 @@ export interface DeadheadShowDetailModalProps {
   showId: string | null;
   onClose: () => void;
   onChange?: (showId: string, patch: Partial<Pick<DeadShowInfo, 'listened' | 'favourite'>>) => void;
+  onSongPress?: (title: string) => void;
 }
 
-export default function DeadheadShowDetailModal({ showId, onClose, onChange }: DeadheadShowDetailModalProps) {
+export default function DeadheadShowDetailModal({ showId, onClose, onChange, onSongPress }: DeadheadShowDetailModalProps) {
   const [show, setShow] = useState<DeadShowInfo | null>(null);
   const [tracks, setTracks] = useState<DeadTrack[]>([]);
   const [loading, setLoading] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
 
   const fieldTimers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
+  const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!showId) {
@@ -122,7 +132,7 @@ export default function DeadheadShowDetailModal({ showId, onClose, onChange }: D
       const [{ data: showData }, { data: trackData }] = await Promise.all([
         supabase
           .from('dead_shows')
-          .select('show_id, date, venue, city, state, country, listened, favourite, lineup_era, lineup_members')
+          .select('show_id, date, venue, city, state, country, listened, favourite, lineup_era, lineup_members, notes')
           .eq('show_id', showId)
           .single(),
         supabase
@@ -150,6 +160,17 @@ export default function DeadheadShowDetailModal({ showId, onClose, onChange }: D
     setShow((prev) => (prev ? { ...prev, favourite } : prev));
     onChange?.(show.show_id, { favourite });
   };
+
+  const updateNotes = useCallback((notes: string) => {
+    if (!show) return;
+    const { show_id } = show;
+    setShow((prev) => (prev ? { ...prev, notes } : prev));
+    if (notesTimer.current) clearTimeout(notesTimer.current);
+    notesTimer.current = setTimeout(async () => {
+      notesTimer.current = null;
+      await supabase.from('dead_shows').update({ notes: notes || null }).eq('show_id', show_id);
+    }, NOTES_DEBOUNCE_MS);
+  }, [show]);
 
   const scheduleTrackFieldUpdate = useCallback((id: number, patch: TrackFieldPatch) => {
     const existing = fieldTimers.current.get(id);
@@ -195,6 +216,11 @@ export default function DeadheadShowDetailModal({ showId, onClose, onChange }: D
   }, []);
 
   const closeEdit = useCallback(() => setEditOpen(false), []);
+
+  const handleSongPress = useCallback((title: string) => {
+    onClose();
+    onSongPress?.(title);
+  }, [onClose, onSongPress]);
 
   const renderEditTrackItem = useCallback(
     ({ item, drag, isActive }: RenderItemParams<DeadTrack>) => (
@@ -244,10 +270,16 @@ export default function DeadheadShowDetailModal({ showId, onClose, onChange }: D
           <Pressable style={styles.detailClose} onPress={onClose} hitSlop={12}>
             <Text style={styles.detailCloseText}>✕</Text>
           </Pressable>
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 56 : 0}
+          >
           <ScrollView
             style={{ flex: 1 }}
             contentContainerStyle={styles.detailContent}
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
           >
             <Text style={styles.detailTitle}>{show ? formatDate(show.date) : ''}</Text>
             <Text style={styles.detailMetaText}>{show ? formatLocation(show) : ''}</Text>
@@ -281,6 +313,21 @@ export default function DeadheadShowDetailModal({ showId, onClose, onChange }: D
                 )}
 
                 {show && (
+                  <View style={styles.notesSection}>
+                    <Text style={styles.tracklistHeading}>Notes</Text>
+                    <TextInput
+                      style={styles.notesInput}
+                      value={show.notes ?? ''}
+                      onChangeText={updateNotes}
+                      placeholder="Add notes about this show…"
+                      placeholderTextColor="rgba(255,255,255,0.3)"
+                      multiline
+                      textAlignVertical="top"
+                    />
+                  </View>
+                )}
+
+                {show && (
                   <View style={styles.tracklist}>
                     <View style={styles.tracklistHeaderRow}>
                       <Text style={styles.tracklistHeading}>Tracklist</Text>
@@ -294,7 +341,16 @@ export default function DeadheadShowDetailModal({ showId, onClose, onChange }: D
                       tracks.map((track, i) => (
                         <View key={track.id} style={styles.trackRow}>
                           <Text style={styles.trackNumber}>{track.track_number ?? i + 1}</Text>
-                          <Text style={styles.trackTitle} numberOfLines={2}>{track.title}</Text>
+                          <Text style={styles.trackTitle} numberOfLines={2}>
+                            {splitSongTitle(track.title).map((seg, idx, arr) => (
+                              <Text key={idx}>
+                                <Text style={onSongPress && styles.trackTitleLink} onPress={onSongPress ? () => handleSongPress(seg) : undefined}>
+                                  {seg}
+                                </Text>
+                                {idx < arr.length - 1 ? ' > ' : ''}
+                              </Text>
+                            ))}
+                          </Text>
                           <Text style={styles.trackLength}>{track.length_display ?? ''}</Text>
                         </View>
                       ))
@@ -304,6 +360,7 @@ export default function DeadheadShowDetailModal({ showId, onClose, onChange }: D
               </>
             )}
           </ScrollView>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
 
@@ -424,6 +481,20 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     lineHeight: 20,
   },
+  notesSection: {
+    marginTop: 24,
+  },
+  notesInput: {
+    marginTop: 8,
+    minHeight: 80,
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.85)',
+    lineHeight: 20,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 10,
+    padding: 12,
+    outlineStyle: 'none',
+  } as any,
   tracklist: {
     marginTop: 24,
   },
@@ -466,6 +537,9 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     color: 'rgba(255,255,255,0.85)',
+  },
+  trackTitleLink: {
+    color: C.accent,
   },
   trackLength: {
     fontSize: 12,

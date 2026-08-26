@@ -17,7 +17,7 @@ import { LogPage } from '@/screens/LogPage';
 import NotesPage, { type Note, type NotesPageHandle } from '@/screens/NotesPage';
 import CinemaPosterPage, { type CinemaPosterPageProps } from '@/screens/CinemaPosterPage';
 import DeadheadShowsPage from '@/screens/DeadheadShowsPage';
-import DeadheadStatsPage from '@/screens/DeadheadStatsPage';
+import DeadheadStatsPage, { type DeadheadStatsPageHandle } from '@/screens/DeadheadStatsPage';
 import LibraryBookPage, { type LibraryBookPageProps } from '@/screens/LibraryBookPage';
 import VideogamePosterPage, { type VideogamePosterPageProps } from '@/screens/VideogamePosterPage';
 import EntertainmentPage from '@/screens/entertainment';
@@ -120,6 +120,7 @@ export default function App() {
   const libraryRef = useRef<SectionPagerHandle>(null);
   const videogamesRef = useRef<SectionPagerHandle>(null);
   const deadheadRef = useRef<SectionPagerHandle>(null);
+  const deadheadStatsRef = useRef<DeadheadStatsPageHandle>(null);
 
   // Tracks whether each section's content is scrolled to its top/bottom edge,
   // so the vertical pager knows when it's safe to take over a vertical drag.
@@ -253,11 +254,6 @@ export default function App() {
     getVideogamesComponent('nineClub', { title: '🏆 9-Club',  mode: 'nine_club'                     }),
   ], [getVideogamesComponent]);
 
-  const deadheadData = useMemo<SectionItem[]>(() => [
-    { id: 'shows', Component: DeadheadShowsPage },
-    { id: 'stats', Component: DeadheadStatsPage },
-  ], []);
-
   const organiseData = useMemo<SectionItem[]>(() => [
     { id: 'habits',        Component: HabitsPage },
     { id: 'todo',          Component: TodoPage },
@@ -322,6 +318,38 @@ export default function App() {
 
     setDrawerOpen(false);
   }, [currentSection]);
+
+  // Lets the Shows page jump straight to a song's entry on the Stats page.
+  // Routed through a ref so the wrapper components below (baked into
+  // deadheadData) can keep a stable identity and never remount, even though
+  // navigateTo's identity changes with currentSection.
+  const goToSongStatsRef = useRef((_title: string) => {});
+  useEffect(() => {
+    goToSongStatsRef.current = (title: string) => {
+      navigateTo('deadhead', 1);
+      deadheadStatsRef.current?.selectSong(title);
+    };
+  }, [navigateTo]);
+  const goToSongStats = useCallback((title: string) => goToSongStatsRef.current(title), []);
+
+  const DeadheadShowsWithLink = useCallback(
+    ({ onEdgesChange }: { onEdgesChange?: EdgesChangeHandler }) => (
+      <DeadheadShowsPage onEdgesChange={onEdgesChange} onSongPress={goToSongStats} />
+    ),
+    [goToSongStats],
+  );
+
+  const DeadheadStatsWithRef = useCallback(
+    ({ onEdgesChange }: { onEdgesChange?: EdgesChangeHandler }) => (
+      <DeadheadStatsPage ref={deadheadStatsRef} onEdgesChange={onEdgesChange} />
+    ),
+    [],
+  );
+
+  const deadheadData = useMemo<SectionItem[]>(() => [
+    { id: 'shows', Component: DeadheadShowsWithLink },
+    { id: 'stats', Component: DeadheadStatsWithRef },
+  ], [DeadheadShowsWithLink, DeadheadStatsWithRef]);
 
   const sections: SectionDef<Section>[] = [
     {
