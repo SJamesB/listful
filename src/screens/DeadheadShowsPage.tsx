@@ -58,7 +58,12 @@ interface DeadShow {
   favourite: boolean;
 }
 
-export default function DeadheadShowsPage({ onEdgesChange }: { onEdgesChange?: EdgesChangeHandler }) {
+export interface DeadheadShowsPageProps {
+  onEdgesChange?: EdgesChangeHandler;
+  onSongPress?: (title: string) => void;
+}
+
+export default function DeadheadShowsPage({ onEdgesChange, onSongPress }: DeadheadShowsPageProps) {
   const edgeScroll = useSectionEdgeScroll(onEdgesChange);
 
   const [items, setItems] = useState<DeadShow[]>([]);
@@ -175,6 +180,7 @@ export default function DeadheadShowsPage({ onEdgesChange }: { onEdgesChange?: E
         showId={detailShowId}
         onClose={closeDetail}
         onChange={handleDetailChange}
+        onSongPress={onSongPress}
       />
     </View>
   );
