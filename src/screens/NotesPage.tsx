@@ -344,9 +344,10 @@ export interface NotesPageHandle {
 interface NotesPageProps {
   onNotesChange?: (notes: Note[]) => void;
   onPageChange?: (index: number) => void;
+  initialIndex?: number;
 }
 
-const NotesPage = forwardRef<NotesPageHandle, NotesPageProps>(function NotesPage({ onNotesChange, onPageChange }, ref) {
+const NotesPage = forwardRef<NotesPageHandle, NotesPageProps>(function NotesPage({ onNotesChange, onPageChange, initialIndex = 0 }, ref) {
   const { width } = useWindowDimensions();
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
@@ -357,7 +358,7 @@ const NotesPage = forwardRef<NotesPageHandle, NotesPageProps>(function NotesPage
   const flatRef = useRef<FlatList<ListItem>>(null);
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const creating = useRef(false);
-  const currentIdxRef = useRef(0);
+  const currentIdxRef = useRef(initialIndex);
   const reorderAnchorRef = useRef<string | null>(null);
 
   useImperativeHandle(ref, () => ({
@@ -598,6 +599,7 @@ const NotesPage = forwardRef<NotesPageHandle, NotesPageProps>(function NotesPage
         renderItem={renderItem}
         getItemLayout={getItemLayout}
         keyboardShouldPersistTaps="handled"
+        initialScrollIndex={Math.min(initialIndex, listData.length - 1)}
         onMomentumScrollEnd={(e) => {
           const idx = Math.round(e.nativeEvent.contentOffset.x / width);
           currentIdxRef.current = idx;

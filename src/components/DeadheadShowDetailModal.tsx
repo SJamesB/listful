@@ -14,7 +14,7 @@ import {
   View,
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { supabase } from '@/lib/supabase';
@@ -106,10 +106,12 @@ export interface DeadheadShowDetailModalProps {
   showId: string | null;
   onClose: () => void;
   onChange?: (showId: string, patch: Partial<Pick<DeadShowInfo, 'listened' | 'favourite'>>) => void;
-  onSongPress?: (title: string) => void;
+  onSongPress?: (title: string, showId: string) => void;
+  onSwipeNext?: () => void;
+  onSwipePrev?: () => void;
 }
 
-export default function DeadheadShowDetailModal({ showId, onClose, onChange, onSongPress }: DeadheadShowDetailModalProps) {
+export default function DeadheadShowDetailModal({ showId, onClose, onChange, onSongPress, onSwipeNext, onSwipePrev }: DeadheadShowDetailModalProps) {
   const [show, setShow] = useState<DeadShowInfo | null>(null);
   const [tracks, setTracks] = useState<DeadTrack[]>([]);
   const [loading, setLoading] = useState(false);
@@ -119,10 +121,10 @@ export default function DeadheadShowDetailModal({ showId, onClose, onChange, onS
   const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    setEditOpen(false);
     if (!showId) {
       setShow(null);
       setTracks([]);
-      setEditOpen(false);
       return;
     }
     setLoading(true);
@@ -218,9 +220,20 @@ export default function DeadheadShowDetailModal({ showId, onClose, onChange, onS
   const closeEdit = useCallback(() => setEditOpen(false), []);
 
   const handleSongPress = useCallback((title: string) => {
+    if (!show) return;
+    const showId = show.show_id;
     onClose();
-    onSongPress?.(title);
-  }, [onClose, onSongPress]);
+    onSongPress?.(title, showId);
+  }, [show, onClose, onSongPress]);
+
+  const swipeGesture = Gesture.Pan()
+    .runOnJS(true)
+    .activeOffsetX([-20, 20])
+    .failOffsetY([-15, 15])
+    .onEnd((e) => {
+      if ((e.translationX < -60 || e.velocityX < -800) && onSwipeNext) onSwipeNext();
+      else if ((e.translationX > 60 || e.velocityX > 800) && onSwipePrev) onSwipePrev();
+    });
 
   const renderEditTrackItem = useCallback(
     ({ item, drag, isActive }: RenderItemParams<DeadTrack>) => (
@@ -261,6 +274,8 @@ export default function DeadheadShowDetailModal({ showId, onClose, onChange, onS
         presentationStyle="overFullScreen"
         onRequestClose={onClose}
       >
+        <GestureHandlerRootView style={{ flex: 1 }}>
+        <GestureDetector gesture={swipeGesture}>
         <View style={styles.detailOverlay}>
           <LinearGradient
             colors={['rgba(8,8,8,0.1)', '#080808']}
@@ -362,6 +377,8 @@ export default function DeadheadShowDetailModal({ showId, onClose, onChange, onS
           </ScrollView>
           </KeyboardAvoidingView>
         </View>
+        </GestureDetector>
+        </GestureHandlerRootView>
       </Modal>
 
       <Modal visible={editOpen} animationType="slide" transparent onRequestClose={closeEdit}>

@@ -1,14 +1,18 @@
-import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import DeadheadShowDetailModal from '@/components/DeadheadShowDetailModal';
 import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
@@ -50,6 +54,7 @@ function formatSeconds(seconds: number): string {
 interface SongSuggestion {
   title: string;
   times_played: number;
+  favourite: boolean;
 }
 
 interface TrackRow {
@@ -73,6 +78,7 @@ interface SongStats {
   longestLocation: string;
   longestShowId: string | null;
   medianDisplay: string;
+  favourite: boolean;
 }
 
 function StatRow({ label, value, sub, onPress }: { label: string; value: string; sub?: string; onPress?: () => void }) {
@@ -96,12 +102,12 @@ function StatRow({ label, value, sub, onPress }: { label: string; value: string;
   return <View style={styles.statRow}>{content}</View>;
 }
 
-export interface DeadheadStatsPageHandle {
+export interface DeadheadSongsPageHandle {
   selectSong: (title: string) => void;
 }
 
-const DeadheadStatsPage = forwardRef<DeadheadStatsPageHandle, { onEdgesChange?: EdgesChangeHandler }>(
-  function DeadheadStatsPage({ onEdgesChange }, ref) {
+const DeadheadSongsPage = forwardRef<DeadheadSongsPageHandle, { onEdgesChange?: EdgesChangeHandler }>(
+  function DeadheadSongsPage({ onEdgesChange }, ref) {
   const edgeScroll = useSectionEdgeScroll(onEdgesChange);
 
   const [query, setQuery] = useState('');
@@ -110,6 +116,7 @@ const DeadheadStatsPage = forwardRef<DeadheadStatsPageHandle, { onEdgesChange?: 
 
   const [allSongs, setAllSongs] = useState<SongSuggestion[]>([]);
   const [allSongsLoading, setAllSongsLoading] = useState(true);
+  const [onlyFavourite, setOnlyFavourite] = useState(false);
 
   const [selected, setSelected] = useState<string | null>(null);
   const [stats, setStats] = useState<SongStats | null>(null);
@@ -121,7 +128,7 @@ const DeadheadStatsPage = forwardRef<DeadheadStatsPageHandle, { onEdgesChange?: 
     fetchAllRows<SongSuggestion>((from, to) =>
       supabase
         .from('dead_songs')
-        .select('title, times_played')
+        .select('title, times_played, favourite')
         .order('times_played', { ascending: false })
         .order('title', { ascending: true })
         .range(from, to),
@@ -142,7 +149,7 @@ const DeadheadStatsPage = forwardRef<DeadheadStatsPageHandle, { onEdgesChange?: 
     const timeout = setTimeout(async () => {
       const { data } = await supabase
         .from('dead_songs')
-        .select('title, times_played')
+        .select('title, times_played, favourite')
         .ilike('title', `%${trimmed}%`)
         .order('times_played', { ascending: false })
         .limit(20);
@@ -152,7 +159,7 @@ const DeadheadStatsPage = forwardRef<DeadheadStatsPageHandle, { onEdgesChange?: 
     return () => clearTimeout(timeout);
   }, [query, selected]);
 
-  const selectSong = async (title: string) => {
+  const selectSong = useCallback(async (title: string) => {
     setSelected(title);
     setSuggestions([]);
     setStats(null);
@@ -186,6 +193,8 @@ const DeadheadStatsPage = forwardRef<DeadheadStatsPageHandle, { onEdgesChange?: 
           ? bySeconds[(bySeconds.length - 1) / 2].seconds
           : (bySeconds[bySeconds.length / 2 - 1].seconds + bySeconds[bySeconds.length / 2].seconds) / 2;
 
+      const favourite = allSongs.find((s) => s.title.toLowerCase() === title.toLowerCase())?.favourite ?? false;
+
       setStats({
         title,
         timesPlayed: rows.length,
@@ -200,117 +209,197 @@ const DeadheadStatsPage = forwardRef<DeadheadStatsPageHandle, { onEdgesChange?: 
         longestLocation: longest?.dead_shows ? formatLocation(longest.dead_shows) : '',
         longestShowId: longest?.show_id ?? null,
         medianDisplay: median != null ? formatSeconds(median) : '—',
+        favourite,
       });
     } finally {
       setStatsLoading(false);
     }
-  };
+  }, [allSongs]);
 
-  const clearSelection = () => {
+  const toggleSongFavourite = useCallback(async (title: string, favourite: boolean) => {
+    const titleLower = title.toLowerCase();
+    setStats((prev) => (prev && prev.title === title ? { ...prev, favourite } : prev));
+    setAllSongs((prev) => prev.map((s) => (s.title.toLowerCase() === titleLower ? { ...s, favourite } : s)));
+    setSuggestions((prev) => prev.map((s) => (s.title.toLowerCase() === titleLower ? { ...s, favourite } : s)));
+    if (favourite) {
+      await supabase.from('dead_song_favourites').upsert({ title_lower: titleLower });
+    } else {
+      await supabase.from('dead_song_favourites').delete().eq('title_lower', titleLower);
+    }
+  }, []);
+
+  const clearSelection = useCallback(() => {
     setSelected(null);
     setStats(null);
     setQuery('');
-  };
+  }, []);
 
   useImperativeHandle(ref, () => ({ selectSong }), [selectSong]);
+
+  const swipeToOffset = useCallback((offset: number) => {
+    if (!selected) return;
+    const idx = allSongs.findIndex((s) => s.title === selected);
+    if (idx === -1) return;
+    const nextIdx = idx + offset;
+    if (nextIdx < 0 || nextIdx >= allSongs.length) return;
+    selectSong(allSongs[nextIdx].title);
+  }, [selected, allSongs, selectSong]);
+
+  const displayedSuggestions = useMemo(
+    () => (onlyFavourite ? suggestions.filter((s) => s.favourite) : suggestions),
+    [suggestions, onlyFavourite],
+  );
+  const displayedAllSongs = useMemo(
+    () => (onlyFavourite ? allSongs.filter((s) => s.favourite) : allSongs),
+    [allSongs, onlyFavourite],
+  );
+
+  const swipeGesture = Gesture.Pan()
+    .runOnJS(true)
+    .activeOffsetX([-20, 20])
+    .failOffsetY([-15, 15])
+    .onEnd((e) => {
+      if (e.translationX < -60 || e.velocityX < -800) swipeToOffset(1);
+      else if (e.translationX > 60 || e.velocityX > 800) swipeToOffset(-1);
+    });
 
   return (
     <View style={styles.root}>
       <View style={styles.header}>
-        <Text style={styles.title}>📊 Stats</Text>
+        <Text style={styles.title}>🎵 Songs</Text>
       </View>
 
       <View style={styles.searchRow}>
         <TextInput
           style={styles.searchInput}
-          value={selected ?? query}
-          onChangeText={(t) => { setSelected(null); setStats(null); setQuery(t); }}
+          value={query}
+          onChangeText={setQuery}
           placeholder="Search a song"
           placeholderTextColor={C.muted}
           autoCapitalize="none"
           autoCorrect={false}
           returnKeyType="search"
         />
-        {selected ? (
-          <Pressable onPress={clearSelection} style={styles.clearBtn} hitSlop={8}>
-            <Text style={styles.clearBtnText}>✕</Text>
-          </Pressable>
-        ) : null}
       </View>
 
-      {!selected && searching ? (
-        <ActivityIndicator color={C.accent} style={{ marginTop: 12 }} />
-      ) : !selected && suggestions.length > 0 ? (
-        <FlatList
-          data={suggestions}
-          keyExtractor={(item) => item.title}
-          contentContainerStyle={styles.suggestList}
-          keyboardShouldPersistTaps="handled"
-          renderItem={({ item }) => (
-            <Pressable style={styles.suggestRow} onPress={() => selectSong(item.title)}>
-              <Text style={styles.suggestTitle}>{item.title}</Text>
-              <Text style={styles.suggestCount}>{item.times_played}×</Text>
-            </Pressable>
-          )}
-        />
-      ) : !selected && query.trim() ? (
-        <Text style={styles.emptyText}>No songs match</Text>
-      ) : !selected && allSongsLoading ? (
-        <ActivityIndicator color={C.accent} style={{ marginTop: 12 }} />
-      ) : !selected ? (
-        <FlatList
-          data={allSongs}
-          keyExtractor={(item) => item.title}
-          contentContainerStyle={styles.suggestList}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-          {...edgeScroll}
-          renderItem={({ item }) => (
-            <Pressable style={styles.suggestRow} onPress={() => selectSong(item.title)}>
-              <Text style={styles.suggestTitle}>{item.title}</Text>
-              <Text style={styles.suggestCount}>{item.times_played}×</Text>
-            </Pressable>
-          )}
-        />
-      ) : null}
-
-      {selected && (
-        <ScrollView
-          contentContainerStyle={styles.statsContent}
-          showsVerticalScrollIndicator={false}
-          {...edgeScroll}
+      <View style={styles.filterRow}>
+        <Pressable
+          onPress={() => setOnlyFavourite((v) => !v)}
+          style={[styles.filterChip, onlyFavourite && styles.filterChipActive]}
         >
-          {statsLoading ? (
-            <ActivityIndicator color={C.accent} style={{ marginTop: 24 }} />
-          ) : stats ? (
-            <>
-              <Text style={styles.songTitle}>{stats.title}</Text>
-              <StatRow label="Times Played" value={String(stats.timesPlayed)} />
-              <StatRow
-                label="First Played"
-                value={stats.firstDate}
-                sub={stats.firstLocation}
-                onPress={stats.firstShowId ? () => setDetailShowId(stats.firstShowId) : undefined}
-              />
-              <StatRow
-                label="Last Played"
-                value={stats.lastDate}
-                sub={stats.lastLocation}
-                onPress={stats.lastShowId ? () => setDetailShowId(stats.lastShowId) : undefined}
-              />
-              <StatRow
-                label="Longest Version"
-                value={stats.longestDisplay}
-                sub={[stats.longestDate, stats.longestLocation].filter(Boolean).join(' — ')}
-                onPress={stats.longestShowId ? () => setDetailShowId(stats.longestShowId) : undefined}
-              />
-              <StatRow label="Median Length" value={stats.medianDisplay} />
-            </>
-          ) : (
-            <Text style={styles.emptyText}>No data for this song</Text>
+          <Text style={[styles.filterChipText, onlyFavourite && styles.filterChipTextActive]}>★ Favourites</Text>
+        </Pressable>
+      </View>
+
+      {searching ? (
+        <ActivityIndicator color={C.accent} style={{ marginTop: 12 }} />
+      ) : suggestions.length > 0 ? (
+        <FlatList
+          data={displayedSuggestions}
+          keyExtractor={(item) => item.title}
+          contentContainerStyle={styles.suggestList}
+          keyboardShouldPersistTaps="handled"
+          ListEmptyComponent={<Text style={styles.emptyText}>No favourites match</Text>}
+          renderItem={({ item }) => (
+            <Pressable style={styles.suggestRow} onPress={() => selectSong(item.title)}>
+              <Text style={styles.suggestTitle}>{item.title}</Text>
+              <View style={styles.suggestBadges}>
+                {item.favourite ? <Text style={styles.suggestFavourite}>★</Text> : null}
+                <Text style={styles.suggestCount}>{item.times_played}×</Text>
+              </View>
+            </Pressable>
           )}
-        </ScrollView>
+        />
+      ) : query.trim() ? (
+        <Text style={styles.emptyText}>No songs match</Text>
+      ) : allSongsLoading ? (
+        <ActivityIndicator color={C.accent} style={{ marginTop: 12 }} />
+      ) : (
+        <FlatList
+          data={displayedAllSongs}
+          keyExtractor={(item) => item.title}
+          contentContainerStyle={styles.suggestList}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          {...edgeScroll}
+          ListEmptyComponent={<Text style={styles.emptyText}>No favourites yet</Text>}
+          renderItem={({ item }) => (
+            <Pressable style={styles.suggestRow} onPress={() => selectSong(item.title)}>
+              <Text style={styles.suggestTitle}>{item.title}</Text>
+              <View style={styles.suggestBadges}>
+                {item.favourite ? <Text style={styles.suggestFavourite}>★</Text> : null}
+                <Text style={styles.suggestCount}>{item.times_played}×</Text>
+              </View>
+            </Pressable>
+          )}
+        />
       )}
+
+      <Modal
+        visible={!!selected}
+        animationType="fade"
+        transparent
+        presentationStyle="overFullScreen"
+        onRequestClose={clearSelection}
+      >
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          <GestureDetector gesture={swipeGesture}>
+            <View style={styles.detailOverlay}>
+              <LinearGradient
+                colors={['rgba(8,8,8,0.1)', '#080808']}
+                locations={[0, 0.5]}
+                style={StyleSheet.absoluteFill}
+              />
+              <Pressable style={styles.detailClose} onPress={clearSelection} hitSlop={12}>
+                <Text style={styles.detailCloseText}>✕</Text>
+              </Pressable>
+              <ScrollView
+                style={{ flex: 1 }}
+                contentContainerStyle={styles.songDetailContent}
+                showsVerticalScrollIndicator={false}
+              >
+                {statsLoading ? (
+                  <ActivityIndicator color="rgba(255,255,255,0.35)" style={{ marginTop: 60 }} />
+                ) : stats ? (
+                  <>
+                    <Text style={styles.songTitle}>{stats.title}</Text>
+                    <View style={styles.switchRow}>
+                      <Text style={styles.switchLabel}>Favourite</Text>
+                      <Switch
+                        value={stats.favourite}
+                        onValueChange={(v) => toggleSongFavourite(stats.title, v)}
+                        trackColor={{ true: C.accent }}
+                      />
+                    </View>
+                    <StatRow label="Times Played" value={String(stats.timesPlayed)} />
+                    <StatRow
+                      label="First Played"
+                      value={stats.firstDate}
+                      sub={stats.firstLocation}
+                      onPress={stats.firstShowId ? () => setDetailShowId(stats.firstShowId) : undefined}
+                    />
+                    <StatRow
+                      label="Last Played"
+                      value={stats.lastDate}
+                      sub={stats.lastLocation}
+                      onPress={stats.lastShowId ? () => setDetailShowId(stats.lastShowId) : undefined}
+                    />
+                    <StatRow
+                      label="Longest Version"
+                      value={stats.longestDisplay}
+                      sub={[stats.longestDate, stats.longestLocation].filter(Boolean).join(' — ')}
+                      onPress={stats.longestShowId ? () => setDetailShowId(stats.longestShowId) : undefined}
+                    />
+                    <StatRow label="Median Length" value={stats.medianDisplay} />
+                  </>
+                ) : (
+                  <Text style={styles.emptyTextDark}>No data for this song</Text>
+                )}
+              </ScrollView>
+            </View>
+          </GestureDetector>
+        </GestureHandlerRootView>
+      </Modal>
 
       <DeadheadShowDetailModal
         showId={detailShowId}
@@ -321,7 +410,7 @@ const DeadheadStatsPage = forwardRef<DeadheadStatsPageHandle, { onEdgesChange?: 
   },
 );
 
-export default DeadheadStatsPage;
+export default DeadheadSongsPage;
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
@@ -353,15 +442,29 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     outlineStyle: 'none',
   } as any,
-  clearBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: 'rgba(26,22,38,0.06)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  filterRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: PADDING,
+    marginBottom: 12,
   },
-  clearBtnText: { fontSize: 13, color: C.muted, fontWeight: '600' },
+  filterChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: 'rgba(26,22,38,0.06)',
+  },
+  filterChipActive: {
+    backgroundColor: C.accent,
+  },
+  filterChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: C.muted,
+  },
+  filterChipTextActive: {
+    color: '#fff',
+  },
   emptyText: { fontSize: 14, color: C.muted, textAlign: 'center', marginTop: 24, paddingHorizontal: 40 },
   suggestList: { paddingHorizontal: PADDING, paddingBottom: 32 },
   suggestRow: {
@@ -373,37 +476,77 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(26,22,38,0.08)',
   },
   suggestTitle: { fontSize: 15, color: C.text, fontWeight: '500', flex: 1, paddingRight: 8 },
+  suggestBadges: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  suggestFavourite: { fontSize: 14, color: C.accent },
   suggestCount: { fontSize: 13, color: C.muted },
-  statsContent: {
-    paddingHorizontal: PADDING,
+  // Song detail modal
+  detailOverlay: {
+    flex: 1,
+    backgroundColor: '#080808',
+  },
+  detailClose: {
+    position: 'absolute',
+    top: 56,
+    right: 20,
+    zIndex: 10,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailCloseText: {
+    color: 'rgba(255,255,255,0.65)',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  songDetailContent: {
+    paddingTop: 72,
+    paddingHorizontal: 28,
     paddingBottom: 64,
   },
+  emptyTextDark: { fontSize: 14, color: 'rgba(255,255,255,0.4)', textAlign: 'center', marginTop: 24, paddingHorizontal: 40 },
   songTitle: {
     fontSize: 22,
     fontWeight: '700',
-    color: C.text,
+    color: '#fff',
     textAlign: 'center',
     letterSpacing: -0.4,
-    marginTop: 8,
-    marginBottom: 24,
+    marginBottom: 8,
+  },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingHorizontal: 2,
+    marginBottom: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+  },
+  switchLabel: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#fff',
   },
   statRow: {
     paddingVertical: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(26,22,38,0.08)',
+    borderBottomColor: 'rgba(255,255,255,0.1)',
     gap: 3,
   },
   statRowPressed: { opacity: 0.6 },
   statLabel: {
     fontSize: 10,
-    color: C.muted,
+    color: 'rgba(255,255,255,0.3)',
     fontWeight: '600',
     letterSpacing: 1,
     textTransform: 'uppercase',
   },
   statValue: {
     fontSize: 17,
-    color: C.text,
+    color: '#fff',
     fontWeight: '600',
   },
   statValueLink: {
@@ -411,6 +554,6 @@ const styles = StyleSheet.create({
   },
   statSub: {
     fontSize: 13,
-    color: C.muted,
+    color: 'rgba(255,255,255,0.5)',
   },
 });

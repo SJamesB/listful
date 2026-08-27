@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -60,10 +60,15 @@ interface DeadShow {
 
 export interface DeadheadShowsPageProps {
   onEdgesChange?: EdgesChangeHandler;
-  onSongPress?: (title: string) => void;
+  onSongPress?: (title: string, showId: string) => void;
 }
 
-export default function DeadheadShowsPage({ onEdgesChange, onSongPress }: DeadheadShowsPageProps) {
+export interface DeadheadShowsPageHandle {
+  openShow: (showId: string) => void;
+}
+
+const DeadheadShowsPage = forwardRef<DeadheadShowsPageHandle, DeadheadShowsPageProps>(
+  function DeadheadShowsPage({ onEdgesChange, onSongPress }, ref) {
   const edgeScroll = useSectionEdgeScroll(onEdgesChange);
 
   const [items, setItems] = useState<DeadShow[]>([]);
@@ -105,9 +110,26 @@ export default function DeadheadShowsPage({ onEdgesChange, onSongPress }: Deadhe
     setDetailShowId(null);
   }, []);
 
+  useImperativeHandle(ref, () => ({
+    openShow: (showId: string) => setDetailShowId(showId),
+  }), []);
+
   const handleDetailChange = useCallback((showId: string, patch: Partial<Pick<DeadShow, 'listened' | 'favourite'>>) => {
     setItems((prev) => prev.map((i) => (i.show_id === showId ? { ...i, ...patch } : i)));
   }, []);
+
+  const swipeToOffset = useCallback((offset: number) => {
+    setDetailShowId((current) => {
+      if (!current) return current;
+      const idx = filtered.findIndex((i) => i.show_id === current);
+      const nextIdx = idx + offset;
+      if (idx === -1 || nextIdx < 0 || nextIdx >= filtered.length) return current;
+      return filtered[nextIdx].show_id;
+    });
+  }, [filtered]);
+
+  const swipeToNext = useCallback(() => swipeToOffset(1), [swipeToOffset]);
+  const swipeToPrev = useCallback(() => swipeToOffset(-1), [swipeToOffset]);
 
   const renderItem = ({ item }: { item: DeadShow }) => (
     <Pressable
@@ -181,10 +203,15 @@ export default function DeadheadShowsPage({ onEdgesChange, onSongPress }: Deadhe
         onClose={closeDetail}
         onChange={handleDetailChange}
         onSongPress={onSongPress}
+        onSwipeNext={swipeToNext}
+        onSwipePrev={swipeToPrev}
       />
     </View>
   );
-}
+  },
+);
+
+export default DeadheadShowsPage;
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
