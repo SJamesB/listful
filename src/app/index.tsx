@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { BackHandler, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PageBackground } from '@/components/PageBackground';
@@ -16,8 +16,8 @@ import { supabase } from '@/lib/supabase';
 import { LogPage } from '@/screens/LogPage';
 import NotesPage, { type Note, type NotesPageHandle } from '@/screens/NotesPage';
 import CinemaPosterPage, { type CinemaPosterPageProps } from '@/screens/CinemaPosterPage';
-import DeadheadShowsPage from '@/screens/DeadheadShowsPage';
-import DeadheadStatsPage, { type DeadheadStatsPageHandle } from '@/screens/DeadheadStatsPage';
+import DeadheadShowsPage, { type DeadheadShowsPageHandle } from '@/screens/DeadheadShowsPage';
+import DeadheadSongsPage, { type DeadheadSongsPageHandle } from '@/screens/DeadheadSongsPage';
 import LibraryBookPage, { type LibraryBookPageProps } from '@/screens/LibraryBookPage';
 import VideogamePosterPage, { type VideogamePosterPageProps } from '@/screens/VideogamePosterPage';
 import EntertainmentPage from '@/screens/entertainment';
@@ -83,7 +83,7 @@ const VIDEOGAMES_MENU_ITEMS = [
 
 const DEADHEAD_MENU_ITEMS = [
   { localIndex: 0, label: '🌹 Shows' },
-  { localIndex: 1, label: '📊 Stats' },
+  { localIndex: 1, label: '🎵 Songs' },
 ];
 
 function HamburgerIcon() {
@@ -120,7 +120,9 @@ export default function App() {
   const libraryRef = useRef<SectionPagerHandle>(null);
   const videogamesRef = useRef<SectionPagerHandle>(null);
   const deadheadRef = useRef<SectionPagerHandle>(null);
-  const deadheadStatsRef = useRef<DeadheadStatsPageHandle>(null);
+  const deadheadShowsRef = useRef<DeadheadShowsPageHandle>(null);
+  const deadheadSongsRef = useRef<DeadheadSongsPageHandle>(null);
+  const pendingReturnShowIdRef = useRef<string | null>(null);
 
   // Tracks whether each section's content is scrolled to its top/bottom edge,
   // so the vertical pager knows when it's safe to take over a vertical drag.
@@ -319,37 +321,62 @@ export default function App() {
     setDrawerOpen(false);
   }, [currentSection]);
 
-  // Lets the Shows page jump straight to a song's entry on the Stats page.
+  // Lets the Shows page jump straight to a song's entry on the Songs page.
   // Routed through a ref so the wrapper components below (baked into
   // deadheadData) can keep a stable identity and never remount, even though
   // navigateTo's identity changes with currentSection.
-  const goToSongStatsRef = useRef((_title: string) => {});
+  const goToSongStatsRef = useRef((_title: string, _showId: string) => {});
   useEffect(() => {
-    goToSongStatsRef.current = (title: string) => {
+    goToSongStatsRef.current = (title: string, showId: string) => {
+      pendingReturnShowIdRef.current = showId;
       navigateTo('deadhead', 1);
-      deadheadStatsRef.current?.selectSong(title);
+      deadheadSongsRef.current?.selectSong(title);
     };
   }, [navigateTo]);
-  const goToSongStats = useCallback((title: string) => goToSongStatsRef.current(title), []);
+  const goToSongStats = useCallback(
+    (title: string, showId: string) => goToSongStatsRef.current(title, showId),
+    [],
+  );
+
+  // Hardware back button: a song tapped from a show's tracklist returns to
+  // that show first; otherwise back always lands on the main Organise page
+  // before it's allowed to leave the app.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      const returnShowId = pendingReturnShowIdRef.current;
+      if (returnShowId && currentSection === 'deadhead' && sectionPage.deadhead === 1) {
+        pendingReturnShowIdRef.current = null;
+        navigateTo('deadhead', 0);
+        deadheadShowsRef.current?.openShow(returnShowId);
+        return true;
+      }
+      if (currentSection !== 'organise' || sectionPage.organise !== 0) {
+        navigateTo('organise', 0);
+        return true;
+      }
+      return false;
+    });
+    return () => sub.remove();
+  }, [navigateTo, currentSection, sectionPage.deadhead, sectionPage.organise]);
 
   const DeadheadShowsWithLink = useCallback(
     ({ onEdgesChange }: { onEdgesChange?: EdgesChangeHandler }) => (
-      <DeadheadShowsPage onEdgesChange={onEdgesChange} onSongPress={goToSongStats} />
+      <DeadheadShowsPage ref={deadheadShowsRef} onEdgesChange={onEdgesChange} onSongPress={goToSongStats} />
     ),
     [goToSongStats],
   );
 
-  const DeadheadStatsWithRef = useCallback(
+  const DeadheadSongsWithRef = useCallback(
     ({ onEdgesChange }: { onEdgesChange?: EdgesChangeHandler }) => (
-      <DeadheadStatsPage ref={deadheadStatsRef} onEdgesChange={onEdgesChange} />
+      <DeadheadSongsPage ref={deadheadSongsRef} onEdgesChange={onEdgesChange} />
     ),
     [],
   );
 
   const deadheadData = useMemo<SectionItem[]>(() => [
     { id: 'shows', Component: DeadheadShowsWithLink },
-    { id: 'stats', Component: DeadheadStatsWithRef },
-  ], [DeadheadShowsWithLink, DeadheadStatsWithRef]);
+    { id: 'songs', Component: DeadheadSongsWithRef },
+  ], [DeadheadShowsWithLink, DeadheadSongsWithRef]);
 
   const sections: SectionDef<Section>[] = [
     {
@@ -373,6 +400,7 @@ export default function App() {
           ref={notesRef}
           onNotesChange={setNotesList}
           onPageChange={(i) => setSectionPage((p) => ({ ...p, notes: i }))}
+          initialIndex={sectionPage.notes}
         />
       ),
     },
