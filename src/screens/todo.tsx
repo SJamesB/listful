@@ -3,8 +3,6 @@ import {
   ActivityIndicator,
   Pressable,
   StyleSheet,
-  Text,
-  TextInput,
   View,
 } from 'react-native';
 import DraggableFlatList, {
@@ -12,6 +10,8 @@ import DraggableFlatList, {
   ScaleDecorator,
 } from 'react-native-draggable-flatlist';
 
+import { Text } from '@/components/Text';
+import { TextInput, type TextInputRef } from '@/components/TextInput';
 import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
 import { supabase } from '@/lib/supabase';
 
@@ -40,7 +40,7 @@ export default function TodoPage({ onEdgesChange }: { onEdgesChange?: EdgesChang
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const submitting = useRef(false);
   const newTextRef = useRef('');
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputRef>(null);
   const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {

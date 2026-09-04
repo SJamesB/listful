@@ -4,11 +4,11 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
   View,
 } from 'react-native';
 
+import { Text } from '@/components/Text';
+import { TextInput } from '@/components/TextInput';
 import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
 import { type CategoryConfig } from '@/lib/logCategories';
 import { supabase } from '@/lib/supabase';

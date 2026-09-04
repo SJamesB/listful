@@ -1,4 +1,3 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -8,20 +7,22 @@ import {
   ScrollView,
   StyleSheet,
   Switch,
-  Text,
-  TextInput,
   View,
 } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import DeadheadShowDetailModal from '@/components/DeadheadShowDetailModal';
+import { PageBackground } from '@/components/PageBackground';
+import { Text } from '@/components/Text';
+import { TextInput } from '@/components/TextInput';
+import { DEADHEAD_BG } from '@/constants/sectionBackgrounds';
 import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
 import { fetchAllRows, supabase } from '@/lib/supabase';
 
 const C = {
   text: '#1A1626',
   muted: 'rgba(26,22,38,0.45)',
-  accent: '#D97706',
+  accent: '#2563EB',
   danger: '#DC2626',
 } as const;
 
@@ -64,6 +65,14 @@ interface TrackRow {
   dead_shows: { date: string; venue: string | null; city: string | null; state: string | null } | null;
 }
 
+interface SongPerformance {
+  showId: string;
+  date: string;
+  location: string;
+  seconds: number | null;
+  display: string;
+}
+
 interface SongStats {
   title: string;
   timesPlayed: number;
@@ -79,6 +88,7 @@ interface SongStats {
   longestShowId: string | null;
   medianDisplay: string;
   favourite: boolean;
+  performances: SongPerformance[];
 }
 
 function StatRow({ label, value, sub, onPress }: { label: string; value: string; sub?: string; onPress?: () => void }) {
@@ -195,6 +205,25 @@ const DeadheadSongsPage = forwardRef<DeadheadSongsPageHandle, { onEdgesChange?: 
 
       const favourite = allSongs.find((s) => s.title.toLowerCase() === title.toLowerCase())?.favourite ?? false;
 
+      const performances: SongPerformance[] = withShow
+        .map((r) => {
+          const parsed = r.length_seconds != null ? parseFloat(r.length_seconds) : NaN;
+          const seconds = Number.isNaN(parsed) ? null : parsed;
+          return {
+            showId: r.show_id,
+            date: formatDate(r.dead_shows!.date),
+            location: formatLocation(r.dead_shows!),
+            seconds,
+            display: r.length_display ?? (seconds != null ? formatSeconds(seconds) : '—'),
+          };
+        })
+        .sort((a, b) => {
+          if (a.seconds == null && b.seconds == null) return 0;
+          if (a.seconds == null) return 1;
+          if (b.seconds == null) return -1;
+          return b.seconds - a.seconds;
+        });
+
       setStats({
         title,
         timesPlayed: rows.length,
@@ -210,6 +239,7 @@ const DeadheadSongsPage = forwardRef<DeadheadSongsPageHandle, { onEdgesChange?: 
         longestShowId: longest?.show_id ?? null,
         medianDisplay: median != null ? formatSeconds(median) : '—',
         favourite,
+        performances,
       });
     } finally {
       setStatsLoading(false);
@@ -244,6 +274,13 @@ const DeadheadSongsPage = forwardRef<DeadheadSongsPageHandle, { onEdgesChange?: 
     if (nextIdx < 0 || nextIdx >= allSongs.length) return;
     selectSong(allSongs[nextIdx].title);
   }, [selected, allSongs, selectSong]);
+
+  const selectedIndex = useMemo(
+    () => allSongs.findIndex((s) => s.title === selected),
+    [allSongs, selected],
+  );
+  const canSwipePrev = selectedIndex > 0;
+  const canSwipeNext = selectedIndex !== -1 && selectedIndex < allSongs.length - 1;
 
   const displayedSuggestions = useMemo(
     () => (onlyFavourite ? suggestions.filter((s) => s.favourite) : suggestions),
@@ -343,15 +380,29 @@ const DeadheadSongsPage = forwardRef<DeadheadSongsPageHandle, { onEdgesChange?: 
         onRequestClose={clearSelection}
       >
         <GestureHandlerRootView style={{ flex: 1 }}>
-          <GestureDetector gesture={swipeGesture}>
-            <View style={styles.detailOverlay}>
-              <LinearGradient
-                colors={['rgba(8,8,8,0.1)', '#080808']}
-                locations={[0, 0.5]}
-                style={StyleSheet.absoluteFill}
-              />
+          <View style={styles.backdrop}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={clearSelection} />
+            <GestureDetector gesture={swipeGesture}>
+            <View style={styles.card}>
+              <PageBackground layer1={DEADHEAD_BG.layer1} layer2={DEADHEAD_BG.layer2} opacity2={0.65} />
               <Pressable style={styles.detailClose} onPress={clearSelection} hitSlop={12}>
                 <Text style={styles.detailCloseText}>✕</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.navArrow, styles.navArrowLeft, !canSwipePrev && styles.navArrowDisabled]}
+                onPress={() => swipeToOffset(-1)}
+                disabled={!canSwipePrev}
+                hitSlop={12}
+              >
+                <Text style={styles.navArrowText}>‹</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.navArrow, styles.navArrowRight, !canSwipeNext && styles.navArrowDisabled]}
+                onPress={() => swipeToOffset(1)}
+                disabled={!canSwipeNext}
+                hitSlop={12}
+              >
+                <Text style={styles.navArrowText}>›</Text>
               </Pressable>
               <ScrollView
                 style={{ flex: 1 }}
@@ -359,7 +410,7 @@ const DeadheadSongsPage = forwardRef<DeadheadSongsPageHandle, { onEdgesChange?: 
                 showsVerticalScrollIndicator={false}
               >
                 {statsLoading ? (
-                  <ActivityIndicator color="rgba(255,255,255,0.35)" style={{ marginTop: 60 }} />
+                  <ActivityIndicator color={C.muted} style={{ marginTop: 60 }} />
                 ) : stats ? (
                   <>
                     <Text style={styles.songTitle}>{stats.title}</Text>
@@ -368,7 +419,7 @@ const DeadheadSongsPage = forwardRef<DeadheadSongsPageHandle, { onEdgesChange?: 
                       <Switch
                         value={stats.favourite}
                         onValueChange={(v) => toggleSongFavourite(stats.title, v)}
-                        trackColor={{ true: C.accent }}
+                        trackColor={{ true: C.danger }}
                       />
                     </View>
                     <StatRow label="Times Played" value={String(stats.timesPlayed)} />
@@ -391,13 +442,29 @@ const DeadheadSongsPage = forwardRef<DeadheadSongsPageHandle, { onEdgesChange?: 
                       onPress={stats.longestShowId ? () => setDetailShowId(stats.longestShowId) : undefined}
                     />
                     <StatRow label="Median Length" value={stats.medianDisplay} />
+
+                    <Text style={styles.sectionLabel}>All Performances ({stats.performances.length})</Text>
+                    {stats.performances.map((p, i) => (
+                      <Pressable
+                        key={`${p.showId}-${i}`}
+                        style={({ pressed }) => [styles.perfRow, pressed && styles.statRowPressed]}
+                        onPress={() => setDetailShowId(p.showId)}
+                      >
+                        <View style={styles.perfInfo}>
+                          <Text style={styles.perfDate}>{p.date}</Text>
+                          {p.location ? <Text style={styles.perfLocation}>{p.location}</Text> : null}
+                        </View>
+                        <Text style={styles.perfLength}>{p.display}</Text>
+                      </Pressable>
+                    ))}
                   </>
                 ) : (
                   <Text style={styles.emptyTextDark}>No data for this song</Text>
                 )}
               </ScrollView>
             </View>
-          </GestureDetector>
+            </GestureDetector>
+          </View>
         </GestureHandlerRootView>
       </Modal>
 
@@ -455,7 +522,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(26,22,38,0.06)',
   },
   filterChipActive: {
-    backgroundColor: C.accent,
+    backgroundColor: C.danger,
   },
   filterChipText: {
     fontSize: 13,
@@ -477,40 +544,74 @@ const styles = StyleSheet.create({
   },
   suggestTitle: { fontSize: 15, color: C.text, fontWeight: '500', flex: 1, paddingRight: 8 },
   suggestBadges: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  suggestFavourite: { fontSize: 14, color: C.accent },
+  suggestFavourite: { fontSize: 14, color: C.danger },
   suggestCount: { fontSize: 13, color: C.muted },
   // Song detail modal
-  detailOverlay: {
+  backdrop: {
     flex: 1,
-    backgroundColor: '#080808',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  card: {
+    width: '88%',
+    height: '85%',
+    borderRadius: 24,
+    overflow: 'hidden',
+    backgroundColor: '#FCA5A5',
   },
   detailClose: {
     position: 'absolute',
-    top: 56,
-    right: 20,
+    top: 14,
+    right: 14,
     zIndex: 10,
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.55)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   detailCloseText: {
-    color: 'rgba(255,255,255,0.65)',
+    color: C.text,
     fontSize: 14,
     fontWeight: '600',
   },
-  songDetailContent: {
-    paddingTop: 72,
-    paddingHorizontal: 28,
-    paddingBottom: 64,
+  navArrow: {
+    position: 'absolute',
+    top: 14,
+    zIndex: 10,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255,255,255,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  emptyTextDark: { fontSize: 14, color: 'rgba(255,255,255,0.4)', textAlign: 'center', marginTop: 24, paddingHorizontal: 40 },
+  navArrowLeft: {
+    left: 14,
+  },
+  navArrowRight: {
+    right: 56,
+  },
+  navArrowDisabled: {
+    opacity: 0.25,
+  },
+  navArrowText: {
+    color: C.text,
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  songDetailContent: {
+    paddingTop: 44,
+    paddingHorizontal: 24,
+    paddingBottom: 40,
+  },
+  emptyTextDark: { fontSize: 14, color: C.muted, textAlign: 'center', marginTop: 24, paddingHorizontal: 40 },
   songTitle: {
     fontSize: 22,
     fontWeight: '700',
-    color: '#fff',
+    color: C.text,
     textAlign: 'center',
     letterSpacing: -0.4,
     marginBottom: 8,
@@ -523,30 +624,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
     marginBottom: 16,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.1)',
+    borderTopColor: 'rgba(26,22,38,0.12)',
   },
   switchLabel: {
     fontSize: 15,
     fontWeight: '500',
-    color: '#fff',
+    color: C.text,
   },
   statRow: {
     paddingVertical: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
+    borderBottomColor: 'rgba(26,22,38,0.1)',
     gap: 3,
   },
   statRowPressed: { opacity: 0.6 },
   statLabel: {
     fontSize: 10,
-    color: 'rgba(255,255,255,0.3)',
+    color: C.muted,
     fontWeight: '600',
     letterSpacing: 1,
     textTransform: 'uppercase',
   },
   statValue: {
     fontSize: 17,
-    color: '#fff',
+    color: C.text,
     fontWeight: '600',
   },
   statValueLink: {
@@ -554,6 +655,40 @@ const styles = StyleSheet.create({
   },
   statSub: {
     fontSize: 13,
-    color: 'rgba(255,255,255,0.5)',
+    color: C.muted,
+  },
+  sectionLabel: {
+    fontSize: 10,
+    color: C.muted,
+    fontWeight: '600',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginTop: 28,
+    marginBottom: 4,
+  },
+  perfRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(26,22,38,0.1)',
+    gap: 12,
+  },
+  perfInfo: { flex: 1 },
+  perfDate: {
+    fontSize: 14,
+    color: C.text,
+    fontWeight: '600',
+  },
+  perfLocation: {
+    fontSize: 12,
+    color: C.muted,
+    marginTop: 2,
+  },
+  perfLength: {
+    fontSize: 14,
+    color: C.accent,
+    fontWeight: '600',
   },
 });

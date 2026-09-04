@@ -6,12 +6,12 @@ import {
   Modal,
   Pressable,
   StyleSheet,
-  Text,
-  TextInput,
   View,
   useWindowDimensions,
 } from 'react-native';
 
+import { Text } from '@/components/Text';
+import { TextInput } from '@/components/TextInput';
 import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
 import { supabase } from '@/lib/supabase';
 import {

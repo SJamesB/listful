@@ -1,4 +1,3 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
@@ -9,18 +8,23 @@ import {
   ScrollView,
   StyleSheet,
   Switch,
-  Text,
-  TextInput,
   View,
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { PageBackground } from '@/components/PageBackground';
+import { Text } from '@/components/Text';
+import { TextInput } from '@/components/TextInput';
+import { DEADHEAD_BG } from '@/constants/sectionBackgrounds';
 import { supabase } from '@/lib/supabase';
 
 const C = {
-  accent: '#D97706',
+  text: '#1A1626',
+  muted: 'rgba(26,22,38,0.45)',
+  accent: '#2563EB',
+  danger: '#DC2626',
 } as const;
 
 const MONTHS = [
@@ -48,6 +52,13 @@ function splitSongTitle(title: string): string[] {
   return title.split('>').map((s) => s.trim()).filter(Boolean);
 }
 
+// A trailing "China Cat Sunflower >" marks a segue into the next track. The
+// DB strips this for song-counting purposes, but the tracklist display
+// should keep it visible since it's how a segue is denoted.
+function hasTrailingSegue(title: string): boolean {
+  return title.trim().endsWith('>');
+}
+
 // Accepts "ss", "m:ss" or "h:mm:ss" and returns the total seconds, or null if
 // the text doesn't parse as a length yet (e.g. still mid-edit).
 function parseLengthSeconds(text: string): number | null {
@@ -66,6 +77,7 @@ interface DeadShowInfo {
   state: string | null;
   country: string | null;
   listened: boolean;
+  listened_at: string | null;
   favourite: boolean;
   lineup_era: string | null;
   lineup_members: string | null;
@@ -105,13 +117,15 @@ function EditTrackSheet({ children }: { children: ReactNode }) {
 export interface DeadheadShowDetailModalProps {
   showId: string | null;
   onClose: () => void;
-  onChange?: (showId: string, patch: Partial<Pick<DeadShowInfo, 'listened' | 'favourite'>>) => void;
+  onChange?: (showId: string, patch: Partial<Pick<DeadShowInfo, 'listened' | 'listened_at' | 'favourite'>>) => void;
   onSongPress?: (title: string, showId: string) => void;
   onSwipeNext?: () => void;
   onSwipePrev?: () => void;
+  canSwipeNext?: boolean;
+  canSwipePrev?: boolean;
 }
 
-export default function DeadheadShowDetailModal({ showId, onClose, onChange, onSongPress, onSwipeNext, onSwipePrev }: DeadheadShowDetailModalProps) {
+export default function DeadheadShowDetailModal({ showId, onClose, onChange, onSongPress, onSwipeNext, onSwipePrev, canSwipeNext = true, canSwipePrev = true }: DeadheadShowDetailModalProps) {
   const [show, setShow] = useState<DeadShowInfo | null>(null);
   const [tracks, setTracks] = useState<DeadTrack[]>([]);
   const [loading, setLoading] = useState(false);
@@ -134,7 +148,7 @@ export default function DeadheadShowDetailModal({ showId, onClose, onChange, onS
       const [{ data: showData }, { data: trackData }] = await Promise.all([
         supabase
           .from('dead_shows')
-          .select('show_id, date, venue, city, state, country, listened, favourite, lineup_era, lineup_members, notes')
+          .select('show_id, date, venue, city, state, country, listened, listened_at, favourite, lineup_era, lineup_members, notes')
           .eq('show_id', showId)
           .single(),
         supabase
@@ -151,9 +165,10 @@ export default function DeadheadShowDetailModal({ showId, onClose, onChange, onS
 
   const toggleListened = async (listened: boolean) => {
     if (!show) return;
-    await supabase.from('dead_shows').update({ listened }).eq('show_id', show.show_id);
-    setShow((prev) => (prev ? { ...prev, listened } : prev));
-    onChange?.(show.show_id, { listened });
+    const listened_at = listened ? new Date().toISOString() : null;
+    await supabase.from('dead_shows').update({ listened, listened_at }).eq('show_id', show.show_id);
+    setShow((prev) => (prev ? { ...prev, listened, listened_at } : prev));
+    onChange?.(show.show_id, { listened, listened_at });
   };
 
   const toggleFavourite = async (favourite: boolean) => {
@@ -275,20 +290,37 @@ export default function DeadheadShowDetailModal({ showId, onClose, onChange, onS
         onRequestClose={onClose}
       >
         <GestureHandlerRootView style={{ flex: 1 }}>
-        <GestureDetector gesture={swipeGesture}>
-        <View style={styles.detailOverlay}>
-          <LinearGradient
-            colors={['rgba(8,8,8,0.1)', '#080808']}
-            locations={[0, 0.5]}
-            style={StyleSheet.absoluteFill}
-          />
+        <View style={styles.backdrop}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+          <GestureDetector gesture={swipeGesture}>
+          <View style={styles.card}>
+          <PageBackground layer1={DEADHEAD_BG.layer1} layer2={DEADHEAD_BG.layer2} opacity2={0.65} />
           <Pressable style={styles.detailClose} onPress={onClose} hitSlop={12}>
             <Text style={styles.detailCloseText}>✕</Text>
           </Pressable>
+          {onSwipePrev && (
+            <Pressable
+              style={[styles.navArrow, styles.navArrowLeft, !canSwipePrev && styles.navArrowDisabled]}
+              onPress={onSwipePrev}
+              disabled={!canSwipePrev}
+              hitSlop={12}
+            >
+              <Text style={styles.navArrowText}>‹</Text>
+            </Pressable>
+          )}
+          {onSwipeNext && (
+            <Pressable
+              style={[styles.navArrow, styles.navArrowRight, !canSwipeNext && styles.navArrowDisabled]}
+              onPress={onSwipeNext}
+              disabled={!canSwipeNext}
+              hitSlop={12}
+            >
+              <Text style={styles.navArrowText}>›</Text>
+            </Pressable>
+          )}
           <KeyboardAvoidingView
             style={{ flex: 1 }}
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 56 : 0}
           >
           <ScrollView
             style={{ flex: 1 }}
@@ -312,12 +344,12 @@ export default function DeadheadShowDetailModal({ showId, onClose, onChange, onS
               <Switch
                 value={!!show?.favourite}
                 onValueChange={toggleFavourite}
-                trackColor={{ true: C.accent }}
+                trackColor={{ true: C.danger }}
               />
             </View>
 
             {loading ? (
-              <ActivityIndicator color="rgba(255,255,255,0.35)" style={{ marginTop: 20 }} />
+              <ActivityIndicator color={C.muted} style={{ marginTop: 20 }} />
             ) : (
               <>
                 {(show?.lineup_era || show?.lineup_members) && (
@@ -335,7 +367,7 @@ export default function DeadheadShowDetailModal({ showId, onClose, onChange, onS
                       value={show.notes ?? ''}
                       onChangeText={updateNotes}
                       placeholder="Add notes about this show…"
-                      placeholderTextColor="rgba(255,255,255,0.3)"
+                      placeholderTextColor="rgba(26,22,38,0.35)"
                       multiline
                       textAlignVertical="top"
                     />
@@ -365,6 +397,7 @@ export default function DeadheadShowDetailModal({ showId, onClose, onChange, onS
                                 {idx < arr.length - 1 ? ' > ' : ''}
                               </Text>
                             ))}
+                            {hasTrailingSegue(track.title) ? ' >' : ''}
                           </Text>
                           <Text style={styles.trackLength}>{track.length_display ?? ''}</Text>
                         </View>
@@ -376,8 +409,9 @@ export default function DeadheadShowDetailModal({ showId, onClose, onChange, onS
             )}
           </ScrollView>
           </KeyboardAvoidingView>
+          </View>
+          </GestureDetector>
         </View>
-        </GestureDetector>
         </GestureHandlerRootView>
       </Modal>
 
@@ -418,43 +452,77 @@ export default function DeadheadShowDetailModal({ showId, onClose, onChange, onS
 }
 
 const styles = StyleSheet.create({
-  detailOverlay: {
+  backdrop: {
     flex: 1,
-    backgroundColor: '#080808',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  card: {
+    width: '88%',
+    height: '85%',
+    borderRadius: 24,
+    overflow: 'hidden',
+    backgroundColor: '#FCA5A5',
   },
   detailClose: {
     position: 'absolute',
-    top: 56,
-    right: 20,
+    top: 14,
+    right: 14,
     zIndex: 10,
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.55)',
     alignItems: 'center',
     justifyContent: 'center',
   },
+  navArrow: {
+    position: 'absolute',
+    top: 14,
+    zIndex: 10,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255,255,255,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  navArrowLeft: {
+    left: 14,
+  },
+  navArrowRight: {
+    right: 56,
+  },
+  navArrowDisabled: {
+    opacity: 0.25,
+  },
+  navArrowText: {
+    color: C.text,
+    fontSize: 17,
+    fontWeight: '700',
+  },
   detailCloseText: {
-    color: 'rgba(255,255,255,0.65)',
+    color: C.text,
     fontSize: 14,
     fontWeight: '600',
   },
   detailContent: {
-    paddingTop: 72,
-    paddingHorizontal: 28,
-    paddingBottom: 64,
+    paddingTop: 44,
+    paddingHorizontal: 24,
+    paddingBottom: 40,
   },
   detailTitle: {
     fontSize: 22,
     fontWeight: '700',
-    color: '#fff',
+    color: C.text,
     textAlign: 'center',
     letterSpacing: -0.4,
     marginBottom: 8,
   },
   detailMetaText: {
     fontSize: 12,
-    color: 'rgba(255,255,255,0.5)',
+    color: C.muted,
     fontWeight: '500',
     textAlign: 'center',
     marginBottom: 24,
@@ -466,35 +534,35 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 2,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.1)',
+    borderTopColor: 'rgba(26,22,38,0.12)',
   },
   switchLabel: {
     fontSize: 15,
     fontWeight: '500',
-    color: '#fff',
+    color: C.text,
   },
   detailFields: {
     marginTop: 20,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.07)',
+    borderTopColor: 'rgba(26,22,38,0.1)',
   },
   detailRow: {
     flexDirection: 'column',
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.07)',
+    borderBottomColor: 'rgba(26,22,38,0.1)',
     gap: 4,
   },
   detailLabel: {
     fontSize: 10,
-    color: 'rgba(255,255,255,0.3)',
+    color: C.muted,
     fontWeight: '600',
     letterSpacing: 1,
     textTransform: 'uppercase',
   },
   detailValue: {
     fontSize: 14,
-    color: 'rgba(255,255,255,0.82)',
+    color: C.text,
     fontWeight: '500',
     lineHeight: 20,
   },
@@ -505,9 +573,9 @@ const styles = StyleSheet.create({
     marginTop: 8,
     minHeight: 80,
     fontSize: 14,
-    color: 'rgba(255,255,255,0.85)',
+    color: C.text,
     lineHeight: 20,
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'rgba(255,255,255,0.45)',
     borderRadius: 10,
     padding: 12,
     outlineStyle: 'none',
@@ -523,7 +591,7 @@ const styles = StyleSheet.create({
   },
   tracklistHeading: {
     fontSize: 11,
-    color: 'rgba(255,255,255,0.3)',
+    color: C.muted,
     fontWeight: '600',
     letterSpacing: 1,
     textTransform: 'uppercase',
@@ -535,32 +603,32 @@ const styles = StyleSheet.create({
   },
   tracklistEmptyText: {
     fontSize: 13,
-    color: 'rgba(255,255,255,0.35)',
+    color: C.muted,
   },
   trackRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
+    borderBottomColor: 'rgba(26,22,38,0.08)',
     gap: 10,
   },
   trackNumber: {
     fontSize: 12,
-    color: 'rgba(255,255,255,0.35)',
+    color: C.muted,
     width: 20,
   },
   trackTitle: {
     flex: 1,
     fontSize: 14,
-    color: 'rgba(255,255,255,0.85)',
+    color: C.text,
   },
   trackTitleLink: {
     color: C.accent,
   },
   trackLength: {
     fontSize: 12,
-    color: 'rgba(255,255,255,0.4)',
+    color: C.muted,
   },
   // Edit tracklist sheet
   editBackdrop: {

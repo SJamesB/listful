@@ -12,8 +12,6 @@ import {
   StyleProp,
   StyleSheet,
   Switch,
-  Text,
-  TextInput,
   View,
   ViewStyle,
   useWindowDimensions,
@@ -22,6 +20,8 @@ import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-nativ
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Text } from '@/components/Text';
+import { TextInput } from '@/components/TextInput';
 import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
 import { supabase } from '@/lib/supabase';
 

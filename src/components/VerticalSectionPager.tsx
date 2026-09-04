@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle } from 'react';
+import { forwardRef, Fragment, useImperativeHandle } from 'react';
 import { View } from 'react-native';
 
 export interface SectionDef<K extends string> {
@@ -30,7 +30,10 @@ function VerticalSectionPagerInner<K extends string>(
 
   return (
     <View style={{ width, height, overflow: 'hidden' }}>
-      {sections[activeIndex].render()}
+      {/* keyed so same-typed sections (e.g. two SectionPagers) remount instead of reusing scroll state */}
+      <Fragment key={sections[activeIndex].key}>
+        {sections[activeIndex].render()}
+      </Fragment>
     </View>
   );
 }
