@@ -4,10 +4,10 @@ import {
   ActivityIndicator,
   FlatList,
   StyleSheet,
-  Text,
   View,
 } from 'react-native';
 
+import { Text } from '@/components/Text';
 import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
 import { supabase } from '@/lib/supabase';
 

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Animated, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { Section } from '@/app';
+import { Text } from '@/components/Text';
 
 const DRAWER_WIDTH = 280;
 

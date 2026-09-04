@@ -8,14 +8,14 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
   View,
   useWindowDimensions,
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
+import { Text } from '@/components/Text';
+import { TextInput } from '@/components/TextInput';
 import { supabase } from '@/lib/supabase';
 
 const C = {

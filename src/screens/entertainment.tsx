@@ -3,8 +3,6 @@ import {
   ActivityIndicator,
   Pressable,
   StyleSheet,
-  Text,
-  TextInput,
   View,
 } from 'react-native';
 import DraggableFlatList, {
@@ -12,6 +10,8 @@ import DraggableFlatList, {
   ScaleDecorator,
 } from 'react-native-draggable-flatlist';
 
+import { Text } from '@/components/Text';
+import { TextInput } from '@/components/TextInput';
 import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
 import { supabase } from '@/lib/supabase';
 

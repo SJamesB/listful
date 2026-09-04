@@ -10,6 +10,15 @@ import {
   type SectionDef,
   type VerticalSectionPagerHandle,
 } from '@/components/VerticalSectionPager';
+import {
+  CINEMA_BG,
+  DEADHEAD_BG,
+  LIBRARY_BG,
+  NOTES_BG,
+  ORGANISE_BG,
+  VAULT_BG,
+  VIDEOGAMES_BG,
+} from '@/constants/sectionBackgrounds';
 import type { EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
 import { makeConfig, sortCategoryKeys, type CategoryConfig } from '@/lib/logCategories';
 import { supabase } from '@/lib/supabase';
@@ -23,35 +32,6 @@ import VideogamePosterPage, { type VideogamePosterPageProps } from '@/screens/Vi
 import EntertainmentPage from '@/screens/entertainment';
 import HabitsPage from '@/screens/habits';
 import TodoPage from '@/screens/todo';
-
-const ORGANISE_BG = {
-  layer1: ['#FBBFE8', '#C3B8FF', '#B8EEE4', '#FBBFE8'] as const,
-  layer2: ['#FFE8C3', 'transparent', '#C3DCFF'] as const,
-};
-const VAULT_BG = {
-  layer1: ['#FDE68A', '#6EE7B7', '#93C5FD', '#FDE68A'] as const,
-  layer2: ['#FCA5A5', 'transparent', '#C4B5FD'] as const,
-};
-const NOTES_BG = {
-  layer1: ['#FEF9C3', '#FFFBEB', '#FEF3C7', '#FEF9C3'] as const,
-  layer2: ['#FDE68A', 'transparent', '#D9F99D'] as const,
-};
-const CINEMA_BG = {
-  layer1: ['#EDE9FE', '#DDD6FE', '#C4B5FD', '#EDE9FE'] as const,
-  layer2: ['#A78BFA', 'transparent', '#7C3AED'] as const,
-};
-const LIBRARY_BG = {
-  layer1: ['#FDE9D0', '#F5D6A8', '#E8C08A', '#FDE9D0'] as const,
-  layer2: ['#C08552', 'transparent', '#8B5A2B'] as const,
-};
-const VIDEOGAMES_BG = {
-  layer1: ['#C7D2FE', '#A5B4FC', '#818CF8', '#C7D2FE'] as const,
-  layer2: ['#818CF8', 'transparent', '#4F46E5'] as const,
-};
-const DEADHEAD_BG = {
-  layer1: ['#FEE2C7', '#FCA5A5', '#FDBA74', '#FEE2C7'] as const,
-  layer2: ['#F97316', 'transparent', '#DC2626'] as const,
-};
 
 export type Section = 'organise' | 'vault' | 'notes' | 'cinema' | 'library' | 'videogames' | 'deadhead';
 
