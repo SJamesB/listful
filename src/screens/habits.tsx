@@ -11,12 +11,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/Text';
 import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
-import { GOOGLE_REFRESH_TOKEN } from '@/lib/googleConfig';
+import { GOOGLE_CALENDAR_ENABLED } from '@/lib/googleConfig';
 import {
   type CalEvent,
   eventTime,
-  fetchEventsForDate,
-  getAccessToken,
+  fetchEventsForDates,
 } from '@/lib/googleCalendar';
 import { supabase, type Frequency, type RecurringTask } from '@/lib/supabase';
 
@@ -116,13 +115,12 @@ function CalendarSection() {
 
   useEffect(() => {
     let cancelled = false;
-    getAccessToken()
-      .then(async (tok) => {
-        const [td, tm] = await Promise.all([
-          fetchEventsForDate(tok, NOW),
-          fetchEventsForDate(tok, TOMORROW_D),
-        ]);
-        if (!cancelled) { setToday(td); setTomorrow(tm); }
+    fetchEventsForDates([TODAY, toDate(TOMORROW_D)])
+      .then((events) => {
+        if (!cancelled) {
+          setToday(events[TODAY] ?? []);
+          setTomorrow(events[toDate(TOMORROW_D)] ?? []);
+        }
       })
       .catch((err: Error) => { if (!cancelled) setError(err.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -374,7 +372,7 @@ export default function HabitsPage({ onEdgesChange }: { onEdgesChange?: EdgesCha
             <Text style={styles.historyBtnText}>History</Text>
           </Pressable>
 
-          {GOOGLE_REFRESH_TOKEN ? <CalendarSection /> : null}
+          {GOOGLE_CALENDAR_ENABLED ? <CalendarSection /> : null}
         </ScrollView>
       )}
 
