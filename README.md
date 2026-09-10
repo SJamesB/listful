@@ -25,6 +25,11 @@ In the output, you'll find options to open the app in a
 
 You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
 
+## Distribution
+
+- **Web**: pushes to `master` automatically build the static web export (`npx expo export -p web`) and deploy it to GitHub Pages via [`.github/workflows/deploy-web.yml`](.github/workflows/deploy-web.yml). The site is served from `https://<owner>.github.io/listful/`, so the build sets `EXPO_BASE_URL=/listful` (see `app.config.js`) — this only affects the web export; native builds and local `expo start` are unaffected. One-time setup: in the repo's **Settings → Pages**, set **Source** to **GitHub Actions**.
+- **Android APK**: manually trigger [`.github/workflows/build-android-apk.yml`](.github/workflows/build-android-apk.yml) (Actions tab → "Build Android APK" → Run workflow) to build a preview APK with EAS and print the download link in the run summary.
+
 ## Get a fresh project
 
 When you're ready, run:
