@@ -10,8 +10,9 @@ export interface CalEvent {
 // Fetches events for each `YYYY-MM-DD` date key via the google-calendar-events
 // Edge Function, which holds the OAuth credentials server-side.
 export async function fetchEventsForDates(dateKeys: string[]): Promise<Record<string, CalEvent[]>> {
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const { data, error } = await supabase.functions.invoke('google-calendar-events', {
-    body: { dates: dateKeys },
+    body: { dates: dateKeys, timeZone },
   });
   if (error) throw new Error(error.message);
   if (data?.error) throw new Error(data.error);
