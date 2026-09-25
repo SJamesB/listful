@@ -23,8 +23,9 @@ import { supabase } from '@/lib/supabase';
 const C = {
   text: '#1A1626',
   muted: 'rgba(26,22,38,0.45)',
-  accent: '#2563EB',
+  accent: '#1E3A8A',
   danger: '#DC2626',
+  upcoming: '#D97706',
 } as const;
 
 const MONTHS = [
@@ -79,6 +80,7 @@ interface DeadShowInfo {
   listened: boolean;
   listened_at: string | null;
   favourite: boolean;
+  upcoming: boolean;
   lineup_era: string | null;
   lineup_members: string | null;
   notes: string | null;
@@ -117,7 +119,7 @@ function EditTrackSheet({ children }: { children: ReactNode }) {
 export interface DeadheadShowDetailModalProps {
   showId: string | null;
   onClose: () => void;
-  onChange?: (showId: string, patch: Partial<Pick<DeadShowInfo, 'listened' | 'listened_at' | 'favourite'>>) => void;
+  onChange?: (showId: string, patch: Partial<Pick<DeadShowInfo, 'listened' | 'listened_at' | 'favourite' | 'upcoming'>>) => void;
   onSongPress?: (title: string, showId: string) => void;
   onSwipeNext?: () => void;
   onSwipePrev?: () => void;
@@ -148,7 +150,7 @@ export default function DeadheadShowDetailModal({ showId, onClose, onChange, onS
       const [{ data: showData }, { data: trackData }] = await Promise.all([
         supabase
           .from('dead_shows')
-          .select('show_id, date, venue, city, state, country, listened, listened_at, favourite, lineup_era, lineup_members, notes')
+          .select('show_id, date, venue, city, state, country, listened, listened_at, favourite, upcoming, lineup_era, lineup_members, notes')
           .eq('show_id', showId)
           .single(),
         supabase
@@ -169,6 +171,13 @@ export default function DeadheadShowDetailModal({ showId, onClose, onChange, onS
     await supabase.from('dead_shows').update({ listened, listened_at }).eq('show_id', show.show_id);
     setShow((prev) => (prev ? { ...prev, listened, listened_at } : prev));
     onChange?.(show.show_id, { listened, listened_at });
+  };
+
+  const toggleUpcoming = async (upcoming: boolean) => {
+    if (!show) return;
+    await supabase.from('dead_shows').update({ upcoming }).eq('show_id', show.show_id);
+    setShow((prev) => (prev ? { ...prev, upcoming } : prev));
+    onChange?.(show.show_id, { upcoming });
   };
 
   const toggleFavourite = async (favourite: boolean) => {
@@ -345,6 +354,14 @@ export default function DeadheadShowDetailModal({ showId, onClose, onChange, onS
                 value={!!show?.favourite}
                 onValueChange={toggleFavourite}
                 trackColor={{ true: C.danger }}
+              />
+            </View>
+            <View style={styles.switchRow}>
+              <Text style={styles.switchLabel}>Upcoming</Text>
+              <Switch
+                value={!!show?.upcoming}
+                onValueChange={toggleUpcoming}
+                trackColor={{ true: C.upcoming }}
               />
             </View>
 

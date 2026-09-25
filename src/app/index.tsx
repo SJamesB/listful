@@ -27,6 +27,7 @@ import NotesPage, { type Note, type NotesPageHandle } from '@/screens/NotesPage'
 import CinemaPosterPage, { type CinemaPosterPageProps } from '@/screens/CinemaPosterPage';
 import DeadheadShowsPage, { type DeadheadShowsPageHandle } from '@/screens/DeadheadShowsPage';
 import DeadheadSongsPage, { type DeadheadSongsPageHandle } from '@/screens/DeadheadSongsPage';
+import DeadheadTransitionsPage from '@/screens/DeadheadTransitionsPage';
 import LibraryBookPage, { type LibraryBookPageProps } from '@/screens/LibraryBookPage';
 import VideogamePosterPage, { type VideogamePosterPageProps } from '@/screens/VideogamePosterPage';
 import EntertainmentPage from '@/screens/entertainment';
@@ -64,6 +65,7 @@ const VIDEOGAMES_MENU_ITEMS = [
 const DEADHEAD_MENU_ITEMS = [
   { localIndex: 0, label: '🌹 Shows' },
   { localIndex: 1, label: '🎵 Songs' },
+  { localIndex: 2, label: '🔀 Transitions' },
 ];
 
 function HamburgerIcon() {
@@ -356,6 +358,7 @@ export default function App() {
   const deadheadData = useMemo<SectionItem[]>(() => [
     { id: 'shows', Component: DeadheadShowsWithLink },
     { id: 'songs', Component: DeadheadSongsWithRef },
+    { id: 'transitions', Component: DeadheadTransitionsPage },
   ], [DeadheadShowsWithLink, DeadheadSongsWithRef]);
 
   const sections: SectionDef<Section>[] = [

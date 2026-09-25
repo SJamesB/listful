@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { Section } from '@/app';
 import { Text } from '@/components/Text';
 
-const DRAWER_WIDTH = 280;
+const DRAWER_WIDTH = 300;
 
 export interface MenuItem {
   localIndex: number;
@@ -17,6 +18,28 @@ const ORGANISE: MenuItem[] = [
   { localIndex: 1, label: '🐝 To Do' },
   { localIndex: 2, label: '🦚 La Dolce Vita' },
 ];
+
+// Per-section look in the drawer: an emoji tile and an accent used for the
+// tile tint, the active page pill and its dot.
+const SECTION_STYLE: Record<Section, { label: string; icon: string; accent: string }> = {
+  organise:   { label: 'Organise', icon: '🗂️', accent: '#F472B6' },
+  notes:      { label: 'Notes',    icon: '📝', accent: '#FACC15' },
+  vault:      { label: 'Vault',    icon: '🔐', accent: '#34D399' },
+  cinema:     { label: 'Cinema',   icon: '🎬', accent: '#A78BFA' },
+  library:    { label: 'Library',  icon: '📚', accent: '#F59E0B' },
+  videogames: { label: 'Games',    icon: '🎮', accent: '#818CF8' },
+  deadhead:   { label: 'Deadhead', icon: '💀', accent: '#F87171' },
+};
+
+// Hex accent + alpha (0–1) -> rgba(), for the translucent tints.
+function tint(hex: string, alpha: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
+
+function formatToday(): string {
+  return new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+}
 
 interface Props {
   visible: boolean;
@@ -30,6 +53,15 @@ interface Props {
   libraryPages: MenuItem[];
   videogamePages: MenuItem[];
   deadheadPages: MenuItem[];
+}
+
+function Chevron({ open }: { open: boolean }) {
+  const rotation = useRef(new Animated.Value(open ? 1 : 0)).current;
+  useEffect(() => {
+    Animated.timing(rotation, { toValue: open ? 1 : 0, duration: 180, useNativeDriver: true }).start();
+  }, [open, rotation]);
+  const rotate = rotation.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '90deg'] });
+  return <Animated.Text style={[styles.chevron, { transform: [{ rotate }] }]}>›</Animated.Text>;
 }
 
 export function SideDrawer({
@@ -55,12 +87,12 @@ export function SideDrawer({
       Animated.spring(translateX, {
         toValue: visible ? 0 : -DRAWER_WIDTH,
         useNativeDriver: true,
-        damping: 22,
-        stiffness: 220,
+        damping: 24,
+        stiffness: 240,
       }),
       Animated.timing(backdropOpacity, {
         toValue: visible ? 1 : 0,
-        duration: 180,
+        duration: 200,
         useNativeDriver: true,
       }),
     ]).start();
@@ -82,8 +114,16 @@ export function SideDrawer({
     });
   };
 
-  const isActive = (section: Section, item: MenuItem) =>
-    currentSection === section && currentLocalIndex === item.localIndex;
+  // Drawer order matches the vertical section order in the app.
+  const groups = useMemo<{ section: Section; pages: MenuItem[] }[]>(() => [
+    { section: 'organise',   pages: ORGANISE },
+    { section: 'notes',      pages: notesPages },
+    { section: 'vault',      pages: vaultPages },
+    { section: 'cinema',     pages: cinemaPages },
+    { section: 'library',    pages: libraryPages },
+    { section: 'videogames', pages: videogamePages },
+    { section: 'deadhead',   pages: deadheadPages },
+  ], [notesPages, vaultPages, cinemaPages, libraryPages, videogamePages, deadheadPages]);
 
   return (
     <View
@@ -94,146 +134,100 @@ export function SideDrawer({
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
       </Animated.View>
 
-      <Animated.View
-        style={[styles.drawer, { paddingTop: insets.top + 24 }, { transform: [{ translateX }] }]}
-      >
-        <Text style={styles.appName}>Listful</Text>
+      <Animated.View style={[styles.drawer, { transform: [{ translateX }] }]}>
+        <LinearGradient
+          colors={['#1C1733', '#12101F', '#0B0A14']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0.4, y: 1 }}
+          style={StyleSheet.absoluteFillObject}
+        />
+        {/* Soft colour glow behind the header */}
+        <LinearGradient
+          colors={['rgba(167,139,250,0.28)', 'rgba(244,114,182,0.10)', 'transparent']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0.8, y: 0.35 }}
+          style={StyleSheet.absoluteFillObject}
+        />
 
-        <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
-          {/* Organise */}
-          <Pressable style={styles.sectionHeader} onPress={() => toggle('organise')} hitSlop={8}>
-            <Text style={styles.sectionLabel}>Organise</Text>
-            <Text style={styles.chevron}>{expanded.has('organise') ? '▾' : '▸'}</Text>
-          </Pressable>
-          {expanded.has('organise') && ORGANISE.map((item) => (
-            <Pressable
-              key={item.localIndex}
-              style={[styles.item, isActive('organise', item) && styles.itemActive]}
-              onPress={() => onSelectPage('organise', item.localIndex)}
-            >
-              <Text style={[styles.itemText, isActive('organise', item) && styles.itemTextActive]}>
-                {item.label}
-              </Text>
-            </Pressable>
-          ))}
+        <View style={[styles.header, { paddingTop: insets.top + 28 }]}>
+          <LinearGradient
+            colors={['#A78BFA', '#F472B6']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.logo}
+          >
+            <Text style={styles.logoText}>L</Text>
+          </LinearGradient>
+          <View style={styles.headerText}>
+            <Text style={styles.appName}>Listful</Text>
+            <Text style={styles.today}>{formatToday()}</Text>
+          </View>
+        </View>
 
-          <View style={styles.divider} />
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 32 }]}
+          showsVerticalScrollIndicator={false}
+          bounces={false}
+        >
+          {groups.map(({ section, pages }) => {
+            const { label, icon, accent } = SECTION_STYLE[section];
+            const open = expanded.has(section);
+            const isCurrent = currentSection === section;
+            return (
+              <View key={section} style={styles.group}>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.sectionHeader,
+                    open && styles.sectionHeaderOpen,
+                    pressed && styles.pressed,
+                  ]}
+                  onPress={() => toggle(section)}
+                >
+                  <View style={[styles.iconTile, { backgroundColor: tint(accent, 0.16), borderColor: tint(accent, 0.28) }]}>
+                    <Text style={styles.iconText}>{icon}</Text>
+                  </View>
+                  <Text style={[styles.sectionLabel, isCurrent && styles.sectionLabelCurrent]}>{label}</Text>
+                  {pages.length > 0 ? (
+                    <View style={styles.countPill}>
+                      <Text style={styles.countText}>{pages.length}</Text>
+                    </View>
+                  ) : null}
+                  <Chevron open={open} />
+                </Pressable>
 
-          {/* Notes */}
-          <Pressable style={styles.sectionHeader} onPress={() => toggle('notes')} hitSlop={8}>
-            <Text style={styles.sectionLabel}>Notes</Text>
-            <Text style={styles.chevron}>{expanded.has('notes') ? '▾' : '▸'}</Text>
-          </Pressable>
-          {expanded.has('notes') && notesPages.map((item) => (
-            <Pressable
-              key={item.localIndex}
-              style={[styles.item, isActive('notes', item) && styles.itemActive]}
-              onPress={() => onSelectPage('notes', item.localIndex)}
-            >
-              <Text
-                style={[styles.itemText, isActive('notes', item) && styles.itemTextActive]}
-                numberOfLines={1}
-              >
-                {item.label}
-              </Text>
-            </Pressable>
-          ))}
-
-          <View style={styles.divider} />
-
-          {/* Vault */}
-          <Pressable style={styles.sectionHeader} onPress={() => toggle('vault')} hitSlop={8}>
-            <Text style={styles.sectionLabel}>Vault</Text>
-            <Text style={styles.chevron}>{expanded.has('vault') ? '▾' : '▸'}</Text>
-          </Pressable>
-          {expanded.has('vault') && vaultPages.map((item) => (
-            <Pressable
-              key={item.localIndex}
-              style={[styles.item, isActive('vault', item) && styles.itemActive]}
-              onPress={() => onSelectPage('vault', item.localIndex)}
-            >
-              <Text style={[styles.itemText, isActive('vault', item) && styles.itemTextActive]}>
-                {item.label}
-              </Text>
-            </Pressable>
-          ))}
-
-          <View style={styles.divider} />
-
-          {/* Cinema */}
-          <Pressable style={styles.sectionHeader} onPress={() => toggle('cinema')} hitSlop={8}>
-            <Text style={styles.sectionLabel}>Cinema</Text>
-            <Text style={styles.chevron}>{expanded.has('cinema') ? '▾' : '▸'}</Text>
-          </Pressable>
-          {expanded.has('cinema') && cinemaPages.map((item) => (
-            <Pressable
-              key={item.localIndex}
-              style={[styles.item, isActive('cinema', item) && styles.itemActive]}
-              onPress={() => onSelectPage('cinema', item.localIndex)}
-            >
-              <Text style={[styles.itemText, isActive('cinema', item) && styles.itemTextActive]}>
-                {item.label}
-              </Text>
-            </Pressable>
-          ))}
-
-          <View style={styles.divider} />
-
-          {/* Library */}
-          <Pressable style={styles.sectionHeader} onPress={() => toggle('library')} hitSlop={8}>
-            <Text style={styles.sectionLabel}>Library</Text>
-            <Text style={styles.chevron}>{expanded.has('library') ? '▾' : '▸'}</Text>
-          </Pressable>
-          {expanded.has('library') && libraryPages.map((item) => (
-            <Pressable
-              key={item.localIndex}
-              style={[styles.item, isActive('library', item) && styles.itemActive]}
-              onPress={() => onSelectPage('library', item.localIndex)}
-            >
-              <Text style={[styles.itemText, isActive('library', item) && styles.itemTextActive]}>
-                {item.label}
-              </Text>
-            </Pressable>
-          ))}
-
-          <View style={styles.divider} />
-
-          {/* Videogames */}
-          <Pressable style={styles.sectionHeader} onPress={() => toggle('videogames')} hitSlop={8}>
-            <Text style={styles.sectionLabel}>Games</Text>
-            <Text style={styles.chevron}>{expanded.has('videogames') ? '▾' : '▸'}</Text>
-          </Pressable>
-          {expanded.has('videogames') && videogamePages.map((item) => (
-            <Pressable
-              key={item.localIndex}
-              style={[styles.item, isActive('videogames', item) && styles.itemActive]}
-              onPress={() => onSelectPage('videogames', item.localIndex)}
-            >
-              <Text style={[styles.itemText, isActive('videogames', item) && styles.itemTextActive]}>
-                {item.label}
-              </Text>
-            </Pressable>
-          ))}
-
-          <View style={styles.divider} />
-
-          {/* Deadhead */}
-          <Pressable style={styles.sectionHeader} onPress={() => toggle('deadhead')} hitSlop={8}>
-            <Text style={styles.sectionLabel}>Deadhead</Text>
-            <Text style={styles.chevron}>{expanded.has('deadhead') ? '▾' : '▸'}</Text>
-          </Pressable>
-          {expanded.has('deadhead') && deadheadPages.map((item) => (
-            <Pressable
-              key={item.localIndex}
-              style={[styles.item, isActive('deadhead', item) && styles.itemActive]}
-              onPress={() => onSelectPage('deadhead', item.localIndex)}
-            >
-              <Text style={[styles.itemText, isActive('deadhead', item) && styles.itemTextActive]}>
-                {item.label}
-              </Text>
-            </Pressable>
-          ))}
-
+                {open && pages.length > 0 ? (
+                  <View style={styles.items}>
+                    <View style={[styles.guide, { backgroundColor: tint(accent, 0.22) }]} />
+                    {pages.map((item) => {
+                      const active = isCurrent && currentLocalIndex === item.localIndex;
+                      return (
+                        <Pressable
+                          key={item.localIndex}
+                          style={({ pressed }) => [
+                            styles.item,
+                            active && { backgroundColor: tint(accent, 0.16) },
+                            pressed && styles.pressed,
+                          ]}
+                          onPress={() => onSelectPage(section, item.localIndex)}
+                        >
+                          <Text
+                            style={[styles.itemText, active && styles.itemTextActive]}
+                            numberOfLines={1}
+                          >
+                            {item.label}
+                          </Text>
+                          {active ? (
+                            <View style={[styles.activeDot, { backgroundColor: accent, shadowColor: accent }]} />
+                          ) : null}
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ) : null}
+              </View>
+            );
+          })}
         </ScrollView>
       </Animated.View>
     </View>
@@ -245,7 +239,7 @@ const styles = StyleSheet.create({
     zIndex: 100,
   },
   backdrop: {
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(8,6,20,0.55)',
   },
   drawer: {
     position: 'absolute',
@@ -253,57 +247,145 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: DRAWER_WIDTH,
-    backgroundColor: '#0E0E1A',
-    paddingHorizontal: 20,
-    paddingBottom: 32,
+    overflow: 'hidden',
+    borderTopRightRadius: 28,
+    borderBottomRightRadius: 28,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderRightColor: 'rgba(255,255,255,0.08)',
+    shadowColor: '#000',
+    shadowOpacity: 0.45,
+    shadowRadius: 24,
+    shadowOffset: { width: 8, height: 0 },
+    elevation: 24,
   },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 22,
+    paddingBottom: 22,
+  },
+  logo: {
+    width: 42,
+    height: 42,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logoText: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  headerText: { flex: 1 },
   appName: {
     color: '#ffffff',
     fontSize: 22,
     fontWeight: '700',
-    marginBottom: 32,
-    letterSpacing: 0.5,
+    letterSpacing: -0.4,
   },
+  today: {
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 1,
+  },
+  scroll: { flex: 1 },
+  scrollContent: {
+    paddingHorizontal: 14,
+    gap: 4,
+  },
+  group: {},
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 6,
-    marginTop: 4,
-    paddingRight: 2,
+    gap: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    borderRadius: 14,
   },
+  sectionHeaderOpen: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  pressed: { opacity: 0.6 },
+  iconTile: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconText: { fontSize: 16 },
   sectionLabel: {
-    color: 'rgba(255,255,255,0.4)',
+    flex: 1,
+    color: 'rgba(255,255,255,0.78)',
+    fontSize: 15,
+    fontWeight: '600',
+    letterSpacing: -0.1,
+  },
+  sectionLabelCurrent: {
+    color: '#ffffff',
+  },
+  countPill: {
+    minWidth: 22,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 11,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    alignItems: 'center',
+  },
+  countText: {
+    color: 'rgba(255,255,255,0.45)',
     fontSize: 11,
     fontWeight: '600',
-    letterSpacing: 1.4,
-    textTransform: 'uppercase',
   },
   chevron: {
-    color: 'rgba(255,255,255,0.35)',
-    fontSize: 13,
+    width: 14,
+    textAlign: 'center',
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 18,
+    fontWeight: '600',
   },
-  divider: {
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    marginVertical: 16,
+  items: {
+    marginLeft: 25,
+    paddingLeft: 14,
+    paddingTop: 4,
+    paddingBottom: 8,
+    gap: 2,
+  },
+  guide: {
+    position: 'absolute',
+    left: 0,
+    top: 6,
+    bottom: 10,
+    width: 1.5,
+    borderRadius: 1,
   },
   item: {
-    paddingVertical: 11,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 9,
     paddingHorizontal: 12,
-    borderRadius: 8,
-    marginBottom: 2,
-  },
-  itemActive: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 11,
   },
   itemText: {
-    color: 'rgba(255,255,255,0.65)',
-    fontSize: 16,
+    flex: 1,
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 14.5,
     fontWeight: '500',
   },
   itemTextActive: {
     color: '#ffffff',
     fontWeight: '600',
+  },
+  activeDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    marginLeft: 8,
+    shadowOpacity: 0.9,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 0 },
   },
 });

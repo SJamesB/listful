@@ -16,8 +16,9 @@ import { fetchAllRows, supabase } from '@/lib/supabase';
 const C = {
   text: '#1A1626',
   muted: 'rgba(26,22,38,0.45)',
-  accent: '#2563EB',
+  accent: '#1E3A8A',
   danger: '#DC2626',
+  upcoming: '#D97706',
 } as const;
 
 const PADDING = 16;
@@ -57,6 +58,7 @@ interface DeadShow {
   listened: boolean;
   listened_at: string | null;
   favourite: boolean;
+  upcoming: boolean;
 }
 
 export interface DeadheadShowsPageProps {
@@ -77,6 +79,7 @@ const DeadheadShowsPage = forwardRef<DeadheadShowsPageHandle, DeadheadShowsPageP
   const [query, setQuery] = useState('');
   const [onlyListened, setOnlyListened] = useState(false);
   const [onlyFavourite, setOnlyFavourite] = useState(false);
+  const [onlyUpcoming, setOnlyUpcoming] = useState(false);
 
   const [detailShowId, setDetailShowId] = useState<string | null>(null);
 
@@ -84,7 +87,7 @@ const DeadheadShowsPage = forwardRef<DeadheadShowsPageHandle, DeadheadShowsPageP
     fetchAllRows<DeadShow>((from, to) =>
       supabase
         .from('dead_shows')
-        .select('show_id, date, venue, city, state, country, listened, listened_at, favourite')
+        .select('show_id, date, venue, city, state, country, listened, listened_at, favourite, upcoming')
         .order('date', { ascending: true })
         .range(from, to),
     ).then((data) => {
@@ -98,6 +101,7 @@ const DeadheadShowsPage = forwardRef<DeadheadShowsPageHandle, DeadheadShowsPageP
     const result = items.filter((item) => {
       if (onlyListened && !item.listened) return false;
       if (onlyFavourite && !item.favourite) return false;
+      if (onlyUpcoming && !item.upcoming) return false;
       if (q && !matchesQuery(item, q)) return false;
       return true;
     });
@@ -110,7 +114,7 @@ const DeadheadShowsPage = forwardRef<DeadheadShowsPageHandle, DeadheadShowsPageP
       });
     }
     return result;
-  }, [items, query, onlyListened, onlyFavourite]);
+  }, [items, query, onlyListened, onlyFavourite, onlyUpcoming]);
 
   const openDetail = useCallback((item: DeadShow) => {
     setDetailShowId(item.show_id);
@@ -124,7 +128,7 @@ const DeadheadShowsPage = forwardRef<DeadheadShowsPageHandle, DeadheadShowsPageP
     openShow: (showId: string) => setDetailShowId(showId),
   }), []);
 
-  const handleDetailChange = useCallback((showId: string, patch: Partial<Pick<DeadShow, 'listened' | 'listened_at' | 'favourite'>>) => {
+  const handleDetailChange = useCallback((showId: string, patch: Partial<Pick<DeadShow, 'listened' | 'listened_at' | 'favourite' | 'upcoming'>>) => {
     setItems((prev) => prev.map((i) => (i.show_id === showId ? { ...i, ...patch } : i)));
   }, []);
 
@@ -158,6 +162,7 @@ const DeadheadShowsPage = forwardRef<DeadheadShowsPageHandle, DeadheadShowsPageP
         <Text style={styles.rowLocation} numberOfLines={1}>{formatLocation(item)}</Text>
       </View>
       <View style={styles.rowBadges}>
+        {item.upcoming ? <Text style={[styles.badgeText, { color: C.upcoming }]}>⏳</Text> : null}
         {item.favourite ? <Text style={styles.badgeText}>★</Text> : null}
         {item.listened ? <Text style={[styles.badgeText, { color: C.accent }]}>✓</Text> : null}
       </View>
@@ -195,6 +200,12 @@ const DeadheadShowsPage = forwardRef<DeadheadShowsPageHandle, DeadheadShowsPageP
           style={[styles.filterChip, onlyListened && styles.filterChipActive]}
         >
           <Text style={[styles.filterChipText, onlyListened && styles.filterChipTextActive]}>✓ Listened</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setOnlyUpcoming((v) => !v)}
+          style={[styles.filterChip, onlyUpcoming && styles.filterChipActiveUpcoming]}
+        >
+          <Text style={[styles.filterChipText, onlyUpcoming && styles.filterChipTextActive]}>⏳ Upcoming</Text>
         </Pressable>
       </View>
 
@@ -275,6 +286,9 @@ const styles = StyleSheet.create({
   },
   filterChipActiveDanger: {
     backgroundColor: C.danger,
+  },
+  filterChipActiveUpcoming: {
+    backgroundColor: C.upcoming,
   },
   filterChipText: {
     fontSize: 13,
