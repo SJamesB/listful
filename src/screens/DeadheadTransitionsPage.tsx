@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -6,7 +6,6 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   View,
 } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -27,7 +26,6 @@ const C = {
 } as const;
 
 const PADDING = 16;
-const SEARCH_DEBOUNCE_MS = 300;
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -45,37 +43,49 @@ function formatLocation(show: { venue: string | null; city: string | null; state
   return show.venue || place || '';
 }
 
+// Multi-song runs regularly pass the hour mark, so unlike the Songs page this
+// needs an h:mm:ss form too.
 function formatSeconds(seconds: number): string {
-  const total = Math.round(seconds);
-  const m = Math.floor(total / 60);
+  const total = Math.floor(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-interface SongSuggestion {
+// 'pair' = any two adjacent songs linked by a segue; 'run' = an unbroken
+// chain of 3+ songs taken as a whole. See the dead_transitions migration.
+type TransitionKind = 'pair' | 'run';
+
+interface Transition {
+  kind: TransitionKind;
+  transition_key: string;
   title: string;
+  song_count: number;
   times_played: number;
-  favourite: boolean;
 }
 
-interface TrackRow {
-  length_seconds: string | null;
-  length_display: string | null;
+interface PerformanceRow {
   show_id: string;
-  dead_shows: { date: string; venue: string | null; city: string | null; state: string | null } | null;
+  start_track: number | null;
+  length_seconds: string | null;
+  date: string | null;
+  venue: string | null;
+  city: string | null;
+  state: string | null;
 }
 
-interface SongPerformance {
+interface TransitionPerformance {
   showId: string;
   date: string;
   location: string;
   seconds: number | null;
-  display: string;
 }
 
-interface SongStats {
-  title: string;
-  timesPlayed: number;
+interface TransitionStats {
+  transition: Transition;
+  showCount: number;
   firstDate: string;
   firstLocation: string;
   firstShowId: string | null;
@@ -87,8 +97,7 @@ interface SongStats {
   longestLocation: string;
   longestShowId: string | null;
   medianDisplay: string;
-  favourite: boolean;
-  performances: SongPerformance[];
+  performances: TransitionPerformance[];
 }
 
 function StatRow({ label, value, sub, onPress }: { label: string; value: string; sub?: string; onPress?: () => void }) {
@@ -112,90 +121,79 @@ function StatRow({ label, value, sub, onPress }: { label: string; value: string;
   return <View style={styles.statRow}>{content}</View>;
 }
 
-export interface DeadheadSongsPageHandle {
-  selectSong: (title: string) => void;
-}
-
-const DeadheadSongsPage = forwardRef<DeadheadSongsPageHandle, { onEdgesChange?: EdgesChangeHandler }>(
-  function DeadheadSongsPage({ onEdgesChange }, ref) {
+export default function DeadheadTransitionsPage({ onEdgesChange }: { onEdgesChange?: EdgesChangeHandler }) {
   const edgeScroll = useSectionEdgeScroll(onEdgesChange);
 
+  const [kind, setKind] = useState<TransitionKind>('pair');
   const [query, setQuery] = useState('');
-  const [suggestions, setSuggestions] = useState<SongSuggestion[]>([]);
-  const [searching, setSearching] = useState(false);
 
-  const [allSongs, setAllSongs] = useState<SongSuggestion[]>([]);
-  const [allSongsLoading, setAllSongsLoading] = useState(true);
-  const [onlyFavourite, setOnlyFavourite] = useState(false);
+  const [allTransitions, setAllTransitions] = useState<Transition[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const [selected, setSelected] = useState<string | null>(null);
-  const [stats, setStats] = useState<SongStats | null>(null);
+  const [selected, setSelected] = useState<Transition | null>(null);
+  const [stats, setStats] = useState<TransitionStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
 
   const [detailShowId, setDetailShowId] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchAllRows<SongSuggestion>((from, to) =>
+    fetchAllRows<Transition>((from, to) =>
       supabase
-        .from('dead_songs')
-        .select('title, times_played, favourite')
+        .from('dead_transitions')
+        .select('kind, transition_key, title, song_count, times_played')
         .order('times_played', { ascending: false })
         .order('title', { ascending: true })
         .range(from, to),
     ).then((data) => {
-      setAllSongs(data);
-      setAllSongsLoading(false);
+      setAllTransitions(data);
+      setLoading(false);
     });
   }, []);
 
-  useEffect(() => {
-    const trimmed = query.trim();
-    if (!trimmed || selected) {
-      setSuggestions([]);
-      setSearching(false);
-      return;
-    }
-    setSearching(true);
-    const timeout = setTimeout(async () => {
-      const { data } = await supabase
-        .from('dead_songs')
-        .select('title, times_played, favourite')
-        .ilike('title', `%${trimmed}%`)
-        .order('times_played', { ascending: false })
-        .limit(20);
-      setSuggestions((data ?? []) as SongSuggestion[]);
-      setSearching(false);
-    }, SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(timeout);
-  }, [query, selected]);
+  // The whole list (a few thousand rows) is already loaded, so search just
+  // filters it locally rather than round-tripping per keystroke.
+  const displayed = useMemo(() => {
+    const trimmed = query.trim().toLowerCase();
+    return allTransitions.filter(
+      (t) => t.kind === kind && (!trimmed || t.transition_key.includes(trimmed)),
+    );
+  }, [allTransitions, kind, query]);
 
-  const selectSong = useCallback(async (title: string) => {
-    setSelected(title);
-    setSuggestions([]);
+  const selectTransition = useCallback(async (transition: Transition) => {
+    setSelected(transition);
     setStats(null);
     setStatsLoading(true);
     try {
-      const rows = await fetchAllRows<TrackRow>((from, to) =>
+      const rows = await fetchAllRows<PerformanceRow>((from, to) =>
         supabase
-          .from('dead_tracks')
-          .select('length_seconds, length_display, show_id, dead_shows(date, venue, city, state)')
-          .contains('song_titles_lower', [title.toLowerCase()])
-          .order('id', { ascending: true })
-          .range(from, to) as unknown as PromiseLike<{ data: TrackRow[] | null }>,
+          .from('dead_transition_performances')
+          .select('show_id, start_track, length_seconds, date, venue, city, state')
+          .eq('kind', transition.kind)
+          .eq('transition_key', transition.transition_key)
+          .order('date', { ascending: true })
+          .order('start_track', { ascending: true })
+          .range(from, to),
       );
       if (rows.length === 0) {
         setStats(null);
         return;
       }
-      const withShow = rows.filter((r) => r.dead_shows);
-      const byDateAsc = [...withShow].sort((a, b) => a.dead_shows!.date.localeCompare(b.dead_shows!.date));
-      const first = byDateAsc[0];
-      const last = byDateAsc[byDateAsc.length - 1];
 
-      const withLength = rows
-        .filter((r) => r.length_seconds != null)
-        .map((r) => ({ ...r, seconds: parseFloat(r.length_seconds!) }))
-        .filter((r) => !Number.isNaN(r.seconds));
+      const performances: TransitionPerformance[] = rows.map((r) => {
+        const parsed = r.length_seconds != null ? parseFloat(r.length_seconds) : NaN;
+        return {
+          showId: r.show_id,
+          date: r.date ? formatDate(r.date) : '—',
+          location: formatLocation(r),
+          seconds: Number.isNaN(parsed) ? null : parsed,
+        };
+      });
+
+      const withDate = rows.filter((r) => r.date);
+      const first = withDate[0];
+      const last = withDate[withDate.length - 1];
+
+      const withLength = performances.filter((p) => p.seconds != null) as (TransitionPerformance & { seconds: number })[];
       const bySeconds = [...withLength].sort((a, b) => a.seconds - b.seconds);
       const longest = bySeconds[bySeconds.length - 1];
       const median = bySeconds.length === 0 ? null :
@@ -203,93 +201,50 @@ const DeadheadSongsPage = forwardRef<DeadheadSongsPageHandle, { onEdgesChange?: 
           ? bySeconds[(bySeconds.length - 1) / 2].seconds
           : (bySeconds[bySeconds.length / 2 - 1].seconds + bySeconds[bySeconds.length / 2].seconds) / 2;
 
-      const favourite = allSongs.find((s) => s.title.toLowerCase() === title.toLowerCase())?.favourite ?? false;
-
-      const performances: SongPerformance[] = withShow
-        .map((r) => {
-          const parsed = r.length_seconds != null ? parseFloat(r.length_seconds) : NaN;
-          const seconds = Number.isNaN(parsed) ? null : parsed;
-          return {
-            showId: r.show_id,
-            date: formatDate(r.dead_shows!.date),
-            location: formatLocation(r.dead_shows!),
-            seconds,
-            display: r.length_display ?? (seconds != null ? formatSeconds(seconds) : '—'),
-          };
-        })
-        .sort((a, b) => {
+      setStats({
+        transition,
+        showCount: new Set(rows.map((r) => r.show_id)).size,
+        firstDate: first ? formatDate(first.date!) : '—',
+        firstLocation: first ? formatLocation(first) : '',
+        firstShowId: first?.show_id ?? null,
+        lastDate: last ? formatDate(last.date!) : '—',
+        lastLocation: last ? formatLocation(last) : '',
+        lastShowId: last?.show_id ?? null,
+        longestDisplay: longest ? formatSeconds(longest.seconds) : '—',
+        longestDate: longest && longest.date !== '—' ? longest.date : '',
+        longestLocation: longest?.location ?? '',
+        longestShowId: longest?.showId ?? null,
+        medianDisplay: median != null ? formatSeconds(median) : '—',
+        performances: [...performances].sort((a, b) => {
           if (a.seconds == null && b.seconds == null) return 0;
           if (a.seconds == null) return 1;
           if (b.seconds == null) return -1;
           return b.seconds - a.seconds;
-        });
-
-      setStats({
-        title,
-        timesPlayed: rows.length,
-        firstDate: first ? formatDate(first.dead_shows!.date) : '—',
-        firstLocation: first ? formatLocation(first.dead_shows!) : '',
-        firstShowId: first?.show_id ?? null,
-        lastDate: last ? formatDate(last.dead_shows!.date) : '—',
-        lastLocation: last ? formatLocation(last.dead_shows!) : '',
-        lastShowId: last?.show_id ?? null,
-        longestDisplay: longest ? (longest.length_display ?? formatSeconds(longest.seconds)) : '—',
-        longestDate: longest?.dead_shows ? formatDate(longest.dead_shows.date) : '',
-        longestLocation: longest?.dead_shows ? formatLocation(longest.dead_shows) : '',
-        longestShowId: longest?.show_id ?? null,
-        medianDisplay: median != null ? formatSeconds(median) : '—',
-        favourite,
-        performances,
+        }),
       });
     } finally {
       setStatsLoading(false);
-    }
-  }, [allSongs]);
-
-  const toggleSongFavourite = useCallback(async (title: string, favourite: boolean) => {
-    const titleLower = title.toLowerCase();
-    setStats((prev) => (prev && prev.title === title ? { ...prev, favourite } : prev));
-    setAllSongs((prev) => prev.map((s) => (s.title.toLowerCase() === titleLower ? { ...s, favourite } : s)));
-    setSuggestions((prev) => prev.map((s) => (s.title.toLowerCase() === titleLower ? { ...s, favourite } : s)));
-    if (favourite) {
-      await supabase.from('dead_song_favourites').upsert({ title_lower: titleLower });
-    } else {
-      await supabase.from('dead_song_favourites').delete().eq('title_lower', titleLower);
     }
   }, []);
 
   const clearSelection = useCallback(() => {
     setSelected(null);
     setStats(null);
-    setQuery('');
   }, []);
 
-  useImperativeHandle(ref, () => ({ selectSong }), [selectSong]);
-
-  const swipeToOffset = useCallback((offset: number) => {
-    if (!selected) return;
-    const idx = allSongs.findIndex((s) => s.title === selected);
-    if (idx === -1) return;
-    const nextIdx = idx + offset;
-    if (nextIdx < 0 || nextIdx >= allSongs.length) return;
-    selectSong(allSongs[nextIdx].title);
-  }, [selected, allSongs, selectSong]);
-
   const selectedIndex = useMemo(
-    () => allSongs.findIndex((s) => s.title === selected),
-    [allSongs, selected],
+    () => (selected ? displayed.findIndex((t) => t.transition_key === selected.transition_key) : -1),
+    [displayed, selected],
   );
   const canSwipePrev = selectedIndex > 0;
-  const canSwipeNext = selectedIndex !== -1 && selectedIndex < allSongs.length - 1;
+  const canSwipeNext = selectedIndex !== -1 && selectedIndex < displayed.length - 1;
 
-  const displayedSuggestions = useMemo(
-    () => (onlyFavourite ? suggestions.filter((s) => s.favourite) : suggestions),
-    [suggestions, onlyFavourite],
-  );
-  const displayedAllSongs = useMemo(
-    () => (onlyFavourite ? allSongs.filter((s) => s.favourite) : allSongs),
-    [allSongs, onlyFavourite],
-  );
+  const swipeToOffset = useCallback((offset: number) => {
+    if (selectedIndex === -1) return;
+    const nextIdx = selectedIndex + offset;
+    if (nextIdx < 0 || nextIdx >= displayed.length) return;
+    selectTransition(displayed[nextIdx]);
+  }, [selectedIndex, displayed, selectTransition]);
 
   const swipeGesture = Gesture.Pan()
     .runOnJS(true)
@@ -300,10 +255,12 @@ const DeadheadSongsPage = forwardRef<DeadheadSongsPageHandle, { onEdgesChange?: 
       else if (e.translationX > 60 || e.velocityX > 800) swipeToOffset(-1);
     });
 
+  const lengthLabel = stats?.transition.kind === 'run' ? 'Run' : 'Pair';
+
   return (
     <View style={styles.root}>
       <View style={styles.header}>
-        <Text style={styles.title}>🎵 Songs</Text>
+        <Text style={styles.title}>🔀 Transitions</Text>
       </View>
 
       <View style={styles.searchRow}>
@@ -321,52 +278,34 @@ const DeadheadSongsPage = forwardRef<DeadheadSongsPageHandle, { onEdgesChange?: 
 
       <View style={styles.filterRow}>
         <Pressable
-          onPress={() => setOnlyFavourite((v) => !v)}
-          style={[styles.filterChip, onlyFavourite && styles.filterChipActive]}
+          onPress={() => setKind('pair')}
+          style={[styles.filterChip, kind === 'pair' && styles.filterChipActive]}
         >
-          <Text style={[styles.filterChipText, onlyFavourite && styles.filterChipTextActive]}>★ Favourites</Text>
+          <Text style={[styles.filterChipText, kind === 'pair' && styles.filterChipTextActive]}>Two-song</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setKind('run')}
+          style={[styles.filterChip, kind === 'run' && styles.filterChipActive]}
+        >
+          <Text style={[styles.filterChipText, kind === 'run' && styles.filterChipTextActive]}>Multi-song</Text>
         </Pressable>
       </View>
 
-      {searching ? (
-        <ActivityIndicator color={C.accent} style={{ marginTop: 12 }} />
-      ) : suggestions.length > 0 ? (
-        <FlatList
-          data={displayedSuggestions}
-          keyExtractor={(item) => item.title}
-          contentContainerStyle={styles.suggestList}
-          keyboardShouldPersistTaps="handled"
-          ListEmptyComponent={<Text style={styles.emptyText}>No favourites match</Text>}
-          renderItem={({ item }) => (
-            <Pressable style={styles.suggestRow} onPress={() => selectSong(item.title)}>
-              <Text style={styles.suggestTitle}>{item.title}</Text>
-              <View style={styles.suggestBadges}>
-                {item.favourite ? <Text style={styles.suggestFavourite}>★</Text> : null}
-                <Text style={styles.suggestCount}>{item.times_played}×</Text>
-              </View>
-            </Pressable>
-          )}
-        />
-      ) : query.trim() ? (
-        <Text style={styles.emptyText}>No songs match</Text>
-      ) : allSongsLoading ? (
+      {loading ? (
         <ActivityIndicator color={C.accent} style={{ marginTop: 12 }} />
       ) : (
         <FlatList
-          data={displayedAllSongs}
-          keyExtractor={(item) => item.title}
+          data={displayed}
+          keyExtractor={(item) => `${item.kind}:${item.transition_key}`}
           contentContainerStyle={styles.suggestList}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           {...edgeScroll}
-          ListEmptyComponent={<Text style={styles.emptyText}>No favourites yet</Text>}
+          ListEmptyComponent={<Text style={styles.emptyText}>No transitions match</Text>}
           renderItem={({ item }) => (
-            <Pressable style={styles.suggestRow} onPress={() => selectSong(item.title)}>
+            <Pressable style={styles.suggestRow} onPress={() => selectTransition(item)}>
               <Text style={styles.suggestTitle}>{item.title}</Text>
-              <View style={styles.suggestBadges}>
-                {item.favourite ? <Text style={styles.suggestFavourite}>★</Text> : null}
-                <Text style={styles.suggestCount}>{item.times_played}×</Text>
-              </View>
+              <Text style={styles.suggestCount}>{item.times_played}×</Text>
             </Pressable>
           )}
         />
@@ -406,23 +345,28 @@ const DeadheadSongsPage = forwardRef<DeadheadSongsPageHandle, { onEdgesChange?: 
               </Pressable>
               <ScrollView
                 style={{ flex: 1 }}
-                contentContainerStyle={styles.songDetailContent}
+                contentContainerStyle={styles.detailContent}
                 showsVerticalScrollIndicator={false}
               >
                 {statsLoading ? (
                   <ActivityIndicator color={C.muted} style={{ marginTop: 60 }} />
                 ) : stats ? (
                   <>
-                    <Text style={styles.songTitle}>{stats.title}</Text>
-                    <View style={styles.switchRow}>
-                      <Text style={styles.switchLabel}>Favourite</Text>
-                      <Switch
-                        value={stats.favourite}
-                        onValueChange={(v) => toggleSongFavourite(stats.title, v)}
-                        trackColor={{ true: C.danger }}
-                      />
+                    <View style={styles.songChain}>
+                      {stats.transition.title.split(' > ').map((song, i, songs) => (
+                        <Text key={`${song}-${i}`} style={styles.songChainTitle}>
+                          {song}{i < songs.length - 1 ? ' >' : ''}
+                        </Text>
+                      ))}
                     </View>
-                    <StatRow label="Times Played" value={String(stats.timesPlayed)} />
+                    <Text style={styles.songCount}>
+                      {stats.transition.song_count} songs · {stats.transition.kind === 'run' ? 'continuous run' : 'two-song transition'}
+                    </Text>
+                    <StatRow
+                      label="Times Played"
+                      value={String(stats.performances.length)}
+                      sub={stats.showCount !== stats.performances.length ? `across ${stats.showCount} shows` : undefined}
+                    />
                     <StatRow
                       label="First Played"
                       value={stats.firstDate}
@@ -436,7 +380,7 @@ const DeadheadSongsPage = forwardRef<DeadheadSongsPageHandle, { onEdgesChange?: 
                       onPress={stats.lastShowId ? () => setDetailShowId(stats.lastShowId) : undefined}
                     />
                     <StatRow
-                      label="Longest Version"
+                      label={`Longest ${lengthLabel}`}
                       value={stats.longestDisplay}
                       sub={[stats.longestDate, stats.longestLocation].filter(Boolean).join(' — ')}
                       onPress={stats.longestShowId ? () => setDetailShowId(stats.longestShowId) : undefined}
@@ -454,12 +398,12 @@ const DeadheadSongsPage = forwardRef<DeadheadSongsPageHandle, { onEdgesChange?: 
                           <Text style={styles.perfDate}>{p.date}</Text>
                           {p.location ? <Text style={styles.perfLocation}>{p.location}</Text> : null}
                         </View>
-                        <Text style={styles.perfLength}>{p.display}</Text>
+                        <Text style={styles.perfLength}>{p.seconds != null ? formatSeconds(p.seconds) : '—'}</Text>
                       </Pressable>
                     ))}
                   </>
                 ) : (
-                  <Text style={styles.emptyTextDark}>No data for this song</Text>
+                  <Text style={styles.emptyText}>No data for this transition</Text>
                 )}
               </ScrollView>
             </View>
@@ -474,10 +418,7 @@ const DeadheadSongsPage = forwardRef<DeadheadSongsPageHandle, { onEdgesChange?: 
       />
     </View>
   );
-  },
-);
-
-export default DeadheadSongsPage;
+}
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
@@ -543,10 +484,8 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(26,22,38,0.08)',
   },
   suggestTitle: { fontSize: 15, color: C.text, fontWeight: '500', flex: 1, paddingRight: 8 },
-  suggestBadges: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  suggestFavourite: { fontSize: 14, color: C.danger },
   suggestCount: { fontSize: 13, color: C.muted },
-  // Song detail modal
+  // Transition detail modal
   backdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.6)',
@@ -602,34 +541,28 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '700',
   },
-  songDetailContent: {
-    paddingTop: 44,
+  detailContent: {
+    paddingTop: 56,
     paddingHorizontal: 24,
     paddingBottom: 40,
   },
-  emptyTextDark: { fontSize: 14, color: C.muted, textAlign: 'center', marginTop: 24, paddingHorizontal: 40 },
-  songTitle: {
-    fontSize: 22,
+  songChain: {
+    alignItems: 'center',
+    gap: 2,
+  },
+  songChainTitle: {
+    fontSize: 20,
     fontWeight: '700',
     color: C.text,
     textAlign: 'center',
     letterSpacing: -0.4,
-    marginBottom: 8,
   },
-  switchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    paddingHorizontal: 2,
-    marginBottom: 16,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(26,22,38,0.12)',
-  },
-  switchLabel: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: C.text,
+  songCount: {
+    fontSize: 13,
+    color: C.muted,
+    textAlign: 'center',
+    marginTop: 8,
+    marginBottom: 12,
   },
   statRow: {
     paddingVertical: 14,
