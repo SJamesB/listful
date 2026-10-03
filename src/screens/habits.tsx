@@ -83,16 +83,16 @@ type HabitRow = RecurringTask & { done: boolean };
 
 // ─── Calendar sub-components ─────────────────────────────────────────────────
 
-function EventRow({ event }: { event: CalEvent }) {
+function EventRow({ event, dateKey }: { event: CalEvent; dateKey: string }) {
   return (
     <View style={cal.row}>
-      <Text style={cal.time}>{eventTime(event)}</Text>
+      <Text style={cal.time}>{eventTime(event, dateKey)}</Text>
       <Text style={cal.title} numberOfLines={1}>{event.summary}</Text>
     </View>
   );
 }
 
-function CalDay({ label, events, loading }: { label: string; events: CalEvent[]; loading: boolean }) {
+function CalDay({ label, dateKey, events, loading }: { label: string; dateKey: string; events: CalEvent[]; loading: boolean }) {
   return (
     <View style={cal.day}>
       <Text style={cal.dayLabel}>{label}</Text>
@@ -101,7 +101,7 @@ function CalDay({ label, events, loading }: { label: string; events: CalEvent[];
       ) : events.length === 0 ? (
         <Text style={cal.empty}>Nothing scheduled</Text>
       ) : (
-        events.map((e) => <EventRow key={e.id} event={e} />)
+        events.map((e) => <EventRow key={e.id} event={e} dateKey={dateKey} />)
       )}
     </View>
   );
@@ -148,8 +148,8 @@ function CalendarSection() {
   return (
     <View style={cal.section}>
       <View style={cal.divider} />
-      <CalDay label={`Today  ·  ${DATE_LABEL}`}        events={todayEvents}    loading={false} />
-      <CalDay label={`Tomorrow  ·  ${TOMORROW_LABEL}`} events={tomorrowEvents} loading={false} />
+      <CalDay label={`Today  ·  ${DATE_LABEL}`}        dateKey={TODAY}               events={todayEvents}    loading={false} />
+      <CalDay label={`Tomorrow  ·  ${TOMORROW_LABEL}`} dateKey={toDate(TOMORROW_D)} events={tomorrowEvents} loading={false} />
     </View>
   );
 }
