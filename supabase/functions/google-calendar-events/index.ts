@@ -69,6 +69,27 @@ function zonedDateKey(instant: Date, timeZone: string): string {
   }).format(instant);
 }
 
+// The first and last local calendar dates (inclusive, YYYY-MM-DD) an event
+// covers in `timeZone`. Google's end values are exclusive: an all-day end
+// date is the day after, and a timed event ending at midnight doesn't
+// spill onto the next day.
+function eventDateSpan(event: CalEvent, timeZone: string): { first: string; last: string } | undefined {
+  if (event.start.date) {
+    const first = event.start.date;
+    const last = event.end?.date ? addDays(event.end.date, -1) : first;
+    return { first, last: last < first ? first : last };
+  }
+  if (event.start.dateTime) {
+    const start = new Date(event.start.dateTime);
+    const first = zonedDateKey(start, timeZone);
+    if (!event.end?.dateTime) return { first, last: first };
+    const end = new Date(event.end.dateTime);
+    const last = end > start ? zonedDateKey(new Date(end.getTime() - 1), timeZone) : first;
+    return { first, last: last < first ? first : last };
+  }
+  return undefined;
+}
+
 async function fetchEventsInRange(token: string, timeMin: Date, timeMax: Date, timeZone: string): Promise<CalEvent[]> {
   const res = await fetch(
     `https://www.googleapis.com/calendar/v3/calendars/primary/events` +
@@ -111,19 +132,18 @@ Deno.serve(async (req) => {
     const timeMax = zonedMidnightUTC(addDays(maxDate, 1), zone);
     const items = await fetchEventsInRange(token, timeMin, timeMax, zone);
 
-    // Bucket each event under the local calendar date it actually falls on,
-    // rather than trusting which query window it happened to come back in —
-    // that's what previously let all-day events (whose instant, once
-    // converted from UTC midnight, can land the evening before in
-    // timezones ahead of UTC) leak into the prior day's bucket.
+    // Bucket each event under every local calendar date it covers, rather
+    // than trusting which query window it happened to come back in — that's
+    // what previously let all-day events (whose instant, once converted from
+    // UTC midnight, can land the evening before in timezones ahead of UTC)
+    // leak into the prior day's bucket. Multi-day events appear on each day.
     const buckets: Record<string, CalEvent[]> = Object.fromEntries(dates.map((d) => [d, []]));
     for (const item of items) {
-      const dateKey = item.start.date
-        ? item.start.date
-        : item.start.dateTime
-          ? zonedDateKey(new Date(item.start.dateTime), zone)
-          : undefined;
-      if (dateKey && buckets[dateKey]) buckets[dateKey].push(item);
+      const span = eventDateSpan(item, zone);
+      if (!span) continue;
+      for (const date of dates) {
+        if (date >= span.first && date <= span.last) buckets[date].push(item);
+      }
     }
 
     return respond({ events: buckets });
