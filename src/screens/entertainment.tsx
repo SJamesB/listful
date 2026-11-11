@@ -10,6 +10,7 @@ import DraggableFlatList, {
   ScaleDecorator,
 } from 'react-native-draggable-flatlist';
 
+import { pagerSwipeAreaProps } from '@/components/SectionPager';
 import { Text } from '@/components/Text';
 import { TextInput } from '@/components/TextInput';
 import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
@@ -233,7 +234,7 @@ export default function EntertainmentPage({ onEdgesChange }: { onEdgesChange?: E
   ) : null;
 
   return (
-    <View style={styles.root}>
+    <View style={styles.root} {...pagerSwipeAreaProps}>
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={C.accent} /></View>
       ) : (

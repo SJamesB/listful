@@ -3,6 +3,17 @@ import { FlatList, Platform, StyleSheet, View } from 'react-native';
 
 import type { EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
 
+/**
+ * Spread onto the View that wraps a full-page DraggableFlatList inside
+ * a SectionPager. On web, gesture-handler marks the drag container
+ * `touch-action: none`, which stops the browser handing horizontal swipes to
+ * the pager, so page swipes that start on the list stutter or don't happen.
+ * +html.tsx re-allows horizontal panning on that container (inside this View); the
+ * list's own vertical scroll and long-press reordering are unaffected.
+ */
+export const pagerSwipeAreaProps: object =
+  Platform.OS === 'web' ? { dataSet: { pagerSwipeArea: 'true' } } : {};
+
 export interface SectionItem {
   id: string;
   Component: React.ComponentType<{ onEdgesChange?: EdgesChangeHandler }>;
