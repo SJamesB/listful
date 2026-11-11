@@ -28,6 +28,7 @@ You can start developing by editing the files inside the **app** directory. This
 ## Distribution
 
 - **Web**: pushes to `master` automatically build the static web export (`npx expo export -p web`) and deploy it to GitHub Pages via [`.github/workflows/deploy-web.yml`](.github/workflows/deploy-web.yml). The site is served from `https://<owner>.github.io/listful/`, so the build sets `EXPO_BASE_URL=/listful` (see `app.config.js`) — this only affects the web export; native builds and local `expo start` are unaffected. One-time setup: in the repo's **Settings → Pages**, set **Source** to **GitHub Actions**.
+- **Installable web app (PWA)**: the web build is a Progressive Web App. Open `https://sjamesb.github.io/listful/` on the phone and use **Install app** (Chrome) or **Share → Add to Home Screen** (Safari). After that, merging to `master` is the whole release: the app loads the newest deploy on every launch and picks up a new version when it is brought back to the foreground. `npm run build:web` runs the export and then `scripts/generate-sw.js`, which writes the service worker into `dist/`. The manifest and icons live in `public/`; regenerate the icons with `node scripts/generate-pwa-icons.js` after changing `assets/images/icon.png`.
 - **Android APK**: manually trigger [`.github/workflows/build-android-apk.yml`](.github/workflows/build-android-apk.yml) (Actions tab → "Build Android APK" → Run workflow) to build a preview APK with EAS and print the download link in the run summary.
 
 ## Get a fresh project
