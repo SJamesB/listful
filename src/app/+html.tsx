@@ -37,6 +37,8 @@ if ('serviceWorker' in navigator) {
 // - touch-action: pan-x pan-y removes pinch/double-tap zoom, so the browser
 //   can commit to a pan immediately instead of waiting to disambiguate.
 // - touch-callout / tap highlight: no long-press menu or grey flash mid-swipe.
+// - [data-pager-swipe-area]: see pagerSwipeAreaProps in SectionPager.tsx. Matches
+//   the inline touch-action: none gesture-handler sets; !important beats it.
 const APP_SHELL_STYLE = `
 html, body { overscroll-behavior: none; }
 body {
@@ -45,6 +47,7 @@ body {
   -webkit-tap-highlight-color: transparent;
   -webkit-text-size-adjust: 100%;
 }
+[data-pager-swipe-area] div[style*="touch-action: none"] { touch-action: pan-x !important; }
 `;
 
 export default function Root({ children }: PropsWithChildren) {
