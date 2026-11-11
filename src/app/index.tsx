@@ -16,6 +16,7 @@ import {
   LIBRARY_BG,
   NOTES_BG,
   ORGANISE_BG,
+  RECORDS_BG,
   VAULT_BG,
   VIDEOGAMES_BG,
 } from '@/constants/sectionBackgrounds';
@@ -29,12 +30,13 @@ import DeadheadShowsPage, { type DeadheadShowsPageHandle } from '@/screens/Deadh
 import DeadheadSongsPage, { type DeadheadSongsPageHandle } from '@/screens/DeadheadSongsPage';
 import DeadheadTransitionsPage from '@/screens/DeadheadTransitionsPage';
 import LibraryBookPage, { type LibraryBookPageProps } from '@/screens/LibraryBookPage';
+import RecordsPage from '@/screens/RecordsPage';
 import VideogamePosterPage, { type VideogamePosterPageProps } from '@/screens/VideogamePosterPage';
 import EntertainmentPage from '@/screens/entertainment';
 import HabitsPage from '@/screens/habits';
 import TodoPage from '@/screens/todo';
 
-export type Section = 'organise' | 'vault' | 'notes' | 'cinema' | 'library' | 'videogames' | 'deadhead';
+export type Section = 'organise' | 'vault' | 'notes' | 'cinema' | 'library' | 'videogames' | 'records' | 'deadhead';
 
 interface EdgeState {
   atTop: boolean;
@@ -42,7 +44,7 @@ interface EdgeState {
 }
 
 // Vertical scroll order between sections — matches the side drawer's order.
-const SECTION_ORDER: Section[] = ['organise', 'notes', 'vault', 'cinema', 'library', 'videogames', 'deadhead'];
+const SECTION_ORDER: Section[] = ['organise', 'notes', 'vault', 'cinema', 'library', 'videogames', 'records', 'deadhead'];
 
 const CINEMA_MENU_ITEMS = [
   { localIndex: 0, label: '🍿 Watchlist' },
@@ -60,6 +62,23 @@ const VIDEOGAMES_MENU_ITEMS = [
   { localIndex: 0, label: '🎮 Backlog' },
   { localIndex: 1, label: '🕹️ Played' },
   { localIndex: 2, label: '🏆 9-Club' },
+];
+
+const RECORDS_MENU_ITEMS = [
+  { localIndex: 0, label: '💿 Collection' },
+  { localIndex: 1, label: '⭐ Wantlist' },
+];
+
+// Defined at module level so their identity is stable and the pager never remounts them.
+function RecordsCollectionPage({ onEdgesChange }: { onEdgesChange?: EdgesChangeHandler }) {
+  return <RecordsPage title="💿 Collection" list="collection" onEdgesChange={onEdgesChange} />;
+}
+function RecordsWantlistPage({ onEdgesChange }: { onEdgesChange?: EdgesChangeHandler }) {
+  return <RecordsPage title="⭐ Wantlist" list="wantlist" onEdgesChange={onEdgesChange} />;
+}
+const RECORDS_DATA: SectionItem[] = [
+  { id: 'records-collection', Component: RecordsCollectionPage },
+  { id: 'records-wantlist', Component: RecordsWantlistPage },
 ];
 
 const DEADHEAD_MENU_ITEMS = [
@@ -89,7 +108,7 @@ export default function App() {
   const [vaultConfigs, setVaultConfigs] = useState<CategoryConfig[]>([]);
   const [notesList, setNotesList] = useState<Note[]>([]);
   const [sectionIndex, setSectionIndex] = useState(0);
-  const [sectionPage, setSectionPage] = useState({ organise: 0, vault: 0, notes: 0, cinema: 0, library: 0, videogames: 0, deadhead: 0 });
+  const [sectionPage, setSectionPage] = useState({ organise: 0, vault: 0, notes: 0, cinema: 0, library: 0, videogames: 0, records: 0, deadhead: 0 });
   const [pagerHeight, setPagerHeight] = useState(0);
 
   const currentSection = SECTION_ORDER[sectionIndex];
@@ -101,6 +120,7 @@ export default function App() {
   const cinemaRef = useRef<SectionPagerHandle>(null);
   const libraryRef = useRef<SectionPagerHandle>(null);
   const videogamesRef = useRef<SectionPagerHandle>(null);
+  const recordsRef = useRef<SectionPagerHandle>(null);
   const deadheadRef = useRef<SectionPagerHandle>(null);
   const deadheadShowsRef = useRef<DeadheadShowsPageHandle>(null);
   const deadheadSongsRef = useRef<DeadheadSongsPageHandle>(null);
@@ -116,6 +136,7 @@ export default function App() {
     cinema: { atTop: true, atBottom: true },
     library: { atTop: true, atBottom: true },
     videogames: { atTop: true, atBottom: true },
+    records: { atTop: true, atBottom: true },
     deadhead: { atTop: true, atBottom: true },
   });
 
@@ -129,6 +150,7 @@ export default function App() {
       cinema: make('cinema'),
       library: make('library'),
       videogames: make('videogames'),
+      records: make('records'),
       deadhead: make('deadhead'),
     };
   }, []);
@@ -270,6 +292,7 @@ export default function App() {
     currentSection === 'cinema'     ? CINEMA_BG :
     currentSection === 'library'    ? LIBRARY_BG :
     currentSection === 'videogames' ? VIDEOGAMES_BG :
+    currentSection === 'records'    ? RECORDS_BG :
     currentSection === 'deadhead'   ? DEADHEAD_BG :
     NOTES_BG;
 
@@ -296,6 +319,7 @@ export default function App() {
       section === 'cinema'     ? cinemaRef :
       section === 'library'    ? libraryRef :
       section === 'videogames' ? videogamesRef :
+      section === 'records'    ? recordsRef :
       section === 'deadhead'   ? deadheadRef :
       null;
     ref?.current?.scrollToIndex(localIndex);
@@ -444,6 +468,20 @@ export default function App() {
       ),
     },
     {
+      key: 'records',
+      render: () => (
+        <SectionPager
+          ref={recordsRef}
+          data={RECORDS_DATA}
+          width={width}
+          height={pagerHeight}
+          initialIndex={sectionPage.records}
+          onPageChange={(i) => setSectionPage((p) => ({ ...p, records: i }))}
+          onEdgesChange={onEdgesChange.records}
+        />
+      ),
+    },
+    {
       key: 'deadhead',
       render: () => (
         <SectionPager
@@ -501,6 +539,7 @@ export default function App() {
         cinemaPages={CINEMA_MENU_ITEMS}
         libraryPages={LIBRARY_MENU_ITEMS}
         videogamePages={VIDEOGAMES_MENU_ITEMS}
+        recordsPages={RECORDS_MENU_ITEMS}
         deadheadPages={DEADHEAD_MENU_ITEMS}
       />
     </View>
