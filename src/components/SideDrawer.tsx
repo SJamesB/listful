@@ -28,6 +28,7 @@ const SECTION_STYLE: Record<Section, { label: string; icon: string; accent: stri
   cinema:     { label: 'Cinema',   icon: '🎬', accent: '#A78BFA' },
   library:    { label: 'Library',  icon: '📚', accent: '#F59E0B' },
   videogames: { label: 'Games',    icon: '🎮', accent: '#818CF8' },
+  records:    { label: 'Records',  icon: '💿', accent: '#FB923C' },
   deadhead:   { label: 'Deadhead', icon: '💀', accent: '#F87171' },
 };
 
@@ -52,6 +53,7 @@ interface Props {
   cinemaPages: MenuItem[];
   libraryPages: MenuItem[];
   videogamePages: MenuItem[];
+  recordsPages: MenuItem[];
   deadheadPages: MenuItem[];
 }
 
@@ -75,6 +77,7 @@ export function SideDrawer({
   cinemaPages,
   libraryPages,
   videogamePages,
+  recordsPages,
   deadheadPages,
 }: Props) {
   const insets = useSafeAreaInsets();
@@ -122,8 +125,9 @@ export function SideDrawer({
     { section: 'cinema',     pages: cinemaPages },
     { section: 'library',    pages: libraryPages },
     { section: 'videogames', pages: videogamePages },
+    { section: 'records',    pages: recordsPages },
     { section: 'deadhead',   pages: deadheadPages },
-  ], [notesPages, vaultPages, cinemaPages, libraryPages, videogamePages, deadheadPages]);
+  ], [notesPages, vaultPages, cinemaPages, libraryPages, videogamePages, recordsPages, deadheadPages]);
 
   return (
     <View

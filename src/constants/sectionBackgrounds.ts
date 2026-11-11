@@ -22,6 +22,10 @@ export const VIDEOGAMES_BG = {
   layer1: ['#C7D2FE', '#A5B4FC', '#818CF8', '#C7D2FE'] as const,
   layer2: ['#818CF8', 'transparent', '#4F46E5'] as const,
 };
+export const RECORDS_BG = {
+  layer1: ['#FED7AA', '#FDBA74', '#FCD34D', '#FED7AA'] as const,
+  layer2: ['#FB923C', 'transparent', '#B45309'] as const,
+};
 export const DEADHEAD_BG = {
   layer1: ['#FCA5A5', '#93C5FD', '#FDA4AF', '#FCA5A5'] as const,
   layer2: ['#DC2626', 'transparent', '#2563EB'] as const,
