@@ -30,13 +30,30 @@ if ('serviceWorker' in navigator) {
 }
 `;
 
+// Make the installed (standalone) app behave like a native one under touch:
+// - overscroll-behavior: none stops the whole document rubber-banding, which in
+//   standalone mode steals swipes that start slightly diagonally from the
+//   horizontal page scroller and makes paging feel sticky.
+// - touch-action: pan-x pan-y removes pinch/double-tap zoom, so the browser
+//   can commit to a pan immediately instead of waiting to disambiguate.
+// - touch-callout / tap highlight: no long-press menu or grey flash mid-swipe.
+const APP_SHELL_STYLE = `
+html, body { overscroll-behavior: none; }
+body {
+  touch-action: pan-x pan-y;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+}
+`;
+
 export default function Root({ children }: PropsWithChildren) {
   return (
     <html lang="en">
       <head>
         <meta charSet="utf-8" />
         <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
-        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
         <meta name="theme-color" content="#F5F2EE" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -45,6 +62,7 @@ export default function Root({ children }: PropsWithChildren) {
         <link rel="manifest" href="manifest.json" />
         <link rel="apple-touch-icon" href="apple-touch-icon.png" />
         <ScrollViewStyleReset />
+        <style id="app-shell" dangerouslySetInnerHTML={{ __html: APP_SHELL_STYLE }} />
         {process.env.NODE_ENV === 'production' ? (
           <script dangerouslySetInnerHTML={{ __html: SW_REGISTRATION }} />
         ) : null}

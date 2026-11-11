@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react';
-import { FlatList, StyleSheet, View } from 'react-native';
+import { FlatList, Platform, StyleSheet, View } from 'react-native';
 
 import type { EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
 
@@ -55,6 +55,9 @@ export const SectionPager = forwardRef<SectionPagerHandle, SectionPagerProps>(
           horizontal
           pagingEnabled
           showsHorizontalScrollIndicator={false}
+          // Web: keep a swipe past the first/last page inside the pager rather
+          // than chaining it to the document (bounce / browser back gesture).
+          style={Platform.OS === 'web' ? styles.webScroller : undefined}
           scrollEventThrottle={32}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
@@ -79,6 +82,8 @@ export const SectionPager = forwardRef<SectionPagerHandle, SectionPagerProps>(
 );
 
 const styles = StyleSheet.create({
+  // overscrollBehaviorX isn't in RN's style types, but react-native-web passes it through.
+  webScroller: { overscrollBehaviorX: 'contain' } as object,
   dots: {
     position: 'absolute',
     bottom: 14,
