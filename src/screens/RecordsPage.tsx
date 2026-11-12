@@ -13,6 +13,12 @@ import {
   useWindowDimensions,
 } from 'react-native';
 
+import {
+  EMPTY_SELECTION,
+  GenreStyleFilter,
+  matchesSelection,
+  type GenreStyleSelection,
+} from '@/components/GenreStyleFilter';
 import { Text } from '@/components/Text';
 import { TextInput } from '@/components/TextInput';
 import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
@@ -127,6 +133,7 @@ export default function RecordsPage({ title, list, onEdgesChange }: RecordsPageP
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
+  const [tags, setTags] = useState<GenreStyleSelection>(EMPTY_SELECTION);
   const [detailItem, setDetailItem] = useState<RecordItem | null>(null);
   const [tracklist, setTracklist] = useState<Track[] | null>(null);
   const [tracklistLoading, setTracklistLoading] = useState(false);
@@ -220,11 +227,12 @@ export default function RecordsPage({ title, list, onEdgesChange }: RecordsPageP
 
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((i) =>
-      `${i.title} ${i.artists ?? ''} ${i.labels ?? ''}`.toLowerCase().includes(q),
+    return items.filter(
+      (i) =>
+        matchesSelection(i, tags) &&
+        (!q || `${i.title} ${i.artists ?? ''} ${i.labels ?? ''}`.toLowerCase().includes(q)),
     );
-  }, [items, filter]);
+  }, [items, filter, tags]);
 
   const lastSynced = useMemo(
     () => items.reduce<string | null>((max, i) => (!max || i.synced_at > max ? i.synced_at : max), null),
@@ -248,6 +256,7 @@ export default function RecordsPage({ title, list, onEdgesChange }: RecordsPageP
           <Text style={styles.title}>{title}</Text>
           {lastSynced ? (
             <Text style={styles.subtitle}>
+              {visible.length !== items.length ? `${visible.length} of ` : ''}
               {items.length} {items.length === 1 ? 'record' : 'records'} · {formatSyncedAt(lastSynced)}
             </Text>
           ) : null}
@@ -282,6 +291,7 @@ export default function RecordsPage({ title, list, onEdgesChange }: RecordsPageP
           returnKeyType="search"
         />
       ) : null}
+      {items.length > 0 ? <GenreStyleFilter items={items} value={tags} onChange={setTags} /> : null}
 
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={C.accent} /></View>

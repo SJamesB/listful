@@ -13,6 +13,12 @@ import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-nativ
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import {
+  EMPTY_SELECTION,
+  GenreStyleFilter,
+  matchesSelection,
+  type GenreStyleSelection,
+} from '@/components/GenreStyleFilter';
 import { Text } from '@/components/Text';
 import { TextInput } from '@/components/TextInput';
 import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
@@ -66,6 +72,8 @@ interface CollectionRecord {
   year: number | null;
   cover_url: string | null;
   thumb_url: string | null;
+  genres: string[];
+  styles: string[];
 }
 
 const trackKey = (releaseId: number, position: string | null, title: string) =>
@@ -506,6 +514,7 @@ function TrackPicker({
   const insets = useSafeAreaInsets();
   const [records, setRecords] = useState<CollectionRecord[] | null>(collectionCache);
   const [query, setQuery] = useState('');
+  const [tags, setTags] = useState<GenreStyleSelection>(EMPTY_SELECTION);
   const [openId, setOpenId] = useState<number | null>(null);
   const [tracklist, setTracklist] = useState<Track[] | null>(null);
   const [tracklistLoading, setTracklistLoading] = useState(false);
@@ -516,7 +525,7 @@ function TrackPicker({
     fetchAllRows<CollectionRecord>((from, to) =>
       supabase
         .from('record_items')
-        .select('discogs_release_id, title, artists, year, cover_url, thumb_url')
+        .select('discogs_release_id, title, artists, year, cover_url, thumb_url, genres, styles')
         .eq('list', 'collection')
         .order('artists')
         .order('title')
@@ -529,9 +538,10 @@ function TrackPicker({
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!records || !q) return records ?? [];
-    return records.filter((r) => `${r.title} ${r.artists ?? ''}`.toLowerCase().includes(q));
-  }, [records, query]);
+    return (records ?? []).filter(
+      (r) => matchesSelection(r, tags) && (!q || `${r.title} ${r.artists ?? ''}`.toLowerCase().includes(q)),
+    );
+  }, [records, query, tags]);
 
   const toggle = async (record: CollectionRecord) => {
     const id = record.discogs_release_id;
@@ -622,6 +632,7 @@ function TrackPicker({
         autoCorrect={false}
         returnKeyType="search"
       />
+      {records ? <GenreStyleFilter items={records} value={tags} onChange={setTags} tone="dark" /> : null}
       {!records ? (
         <View style={styles.center}><ActivityIndicator color={D.muted} /></View>
       ) : (
