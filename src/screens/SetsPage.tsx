@@ -22,7 +22,9 @@ import {
 import { Text } from '@/components/Text';
 import { TextInput } from '@/components/TextInput';
 import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
+import { AudioBadge, AudioEditor, type AudioTrackRef } from '@/components/TrackAudio';
 import { formatDuration, getTracklist, parseDuration, playableTracks, type Track } from '@/lib/discogs';
+import { audioKey, formatBpm, lookUpTrackAudio, useTrackAudio } from '@/lib/trackAudio';
 import { fetchAllRows, supabase } from '@/lib/supabase';
 
 // Light colours for the section page; the set view itself is dark, like the
@@ -89,14 +91,21 @@ function Thumb({ uri, size, radius = 4 }: { uri: string | null; size: number; ra
   );
 }
 
-function summarise(tracks: { duration: string | null }[]): string {
-  const count = `${tracks.length} ${tracks.length === 1 ? 'track' : 'tracks'}`;
+function summarise(tracks: { duration: string | null }[], bpms: number[]): string {
+  const parts = [`${tracks.length} ${tracks.length === 1 ? 'track' : 'tracks'}`];
   const seconds = tracks.map((t) => parseDuration(t.duration));
   const known = seconds.filter((s): s is number => s != null);
-  if (!known.length) return count;
-  const missing = tracks.length - known.length;
-  const total = formatDuration(known.reduce((a, b) => a + b, 0));
-  return `${count} · ${missing ? `${total}+ (${missing} without length)` : total}`;
+  if (known.length) {
+    const missing = tracks.length - known.length;
+    const total = formatDuration(known.reduce((a, b) => a + b, 0));
+    parts.push(missing ? `${total}+ (${missing} without length)` : total);
+  }
+  if (bpms.length) {
+    const lo = formatBpm(Math.min(...bpms));
+    const hi = formatBpm(Math.max(...bpms));
+    parts.push(lo === hi ? `${lo} BPM` : `${lo}–${hi} BPM`);
+  }
+  return parts.join(' · ');
 }
 
 // ---------------------------------------------------------------------------
@@ -268,6 +277,18 @@ function SetDetail({ setId, onClose }: { setId: string; onClose: () => void }) {
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const audio = useTrackAudio();
+  const [editingAudio, setEditingAudio] = useState<AudioTrackRef | null>(null);
+
+  const audioFor = (t: SetTrack) => audio.get(audioKey(t.release_id, t.track_position, t.track_title));
+  const setBpms = tracks.map((t) => audioFor(t)?.bpm).filter((b): b is number => b != null);
+  const editAudio = (t: SetTrack) =>
+    setEditingAudio({
+      release_id: t.release_id,
+      position: t.track_position,
+      title: t.track_title,
+      subtitle: t.track_artists ?? t.album_artists,
+    });
 
   const load = useCallback(async () => {
     const [{ data: set }, { data: rows }] = await Promise.all([
@@ -314,6 +335,9 @@ function SetDetail({ setId, onClose }: { setId: string; onClose: () => void }) {
     }
     setTracks((prev) => [...prev, data as SetTrack]);
     touch();
+    // If the background lookup hasn't reached this track yet, do it now.
+    lookUpTrackAudio([{ release_id: record.discogs_release_id, position: track.position, title: track.title }])
+      .catch(() => {});
   };
 
   const removeTrack = async (track: SetTrack) => {
@@ -367,7 +391,10 @@ function SetDetail({ setId, onClose }: { setId: string; onClose: () => void }) {
               {item.album_title}{item.track_position ? ` · ${item.track_position}` : ''}
             </Text>
           </View>
-          {item.duration ? <Text style={styles.trackDuration}>{item.duration}</Text> : null}
+          <View style={styles.trackSide}>
+            <AudioBadge audio={audioFor(item)} onPress={() => editAudio(item)} />
+            {item.duration ? <Text style={styles.trackDuration}>{item.duration}</Text> : null}
+          </View>
           <Pressable onPress={() => removeTrack(item)} hitSlop={10} style={styles.removeBtn}>
             <Text style={styles.removeText}>✕</Text>
           </Pressable>
@@ -383,6 +410,11 @@ function SetDetail({ setId, onClose }: { setId: string; onClose: () => void }) {
         <View style={styles.coverBadge}>
           <Text style={styles.coverBadgeText}>{index + 1}</Text>
         </View>
+        {audioFor(item)?.bpm != null || audioFor(item)?.musical_key != null ? (
+          <View style={styles.coverAudio}>
+            <AudioBadge audio={audioFor(item)} onPress={() => editAudio(item)} />
+          </View>
+        ) : null}
       </View>
       <Text style={styles.coverTitle} numberOfLines={1}>{item.track_title}</Text>
       <Text style={styles.coverArtist} numberOfLines={1}>{item.track_artists ?? item.album_artists}</Text>
@@ -421,7 +453,7 @@ function SetDetail({ setId, onClose }: { setId: string; onClose: () => void }) {
           <Text style={styles.detailName}>{name}</Text>
         </Pressable>
       )}
-      <Text style={styles.detailMeta}>{summarise(tracks)}</Text>
+      <Text style={styles.detailMeta}>{summarise(tracks, setBpms)}</Text>
 
       {!adding ? (
         <View style={styles.segment}>
@@ -470,6 +502,7 @@ function SetDetail({ setId, onClose }: { setId: string; onClose: () => void }) {
           data={tracks}
           keyExtractor={(t) => t.id}
           renderItem={renderRow}
+          extraData={audio}
           onDragEnd={onDragEnd}
           activationDistance={5}
           containerStyle={{ flex: 1 }}
@@ -484,6 +517,7 @@ function SetDetail({ setId, onClose }: { setId: string; onClose: () => void }) {
           data={tracks}
           keyExtractor={(t) => t.id}
           renderItem={renderCover}
+          extraData={audio}
           numColumns={GRID_COLS}
           columnWrapperStyle={{ gap: GAP }}
           contentContainerStyle={{ paddingHorizontal: PADDING, paddingTop: 4 }}
@@ -492,6 +526,11 @@ function SetDetail({ setId, onClose }: { setId: string; onClose: () => void }) {
           showsVerticalScrollIndicator={false}
         />
       )}
+      <AudioEditor
+        track={editingAudio}
+        audio={editingAudio ? audio.get(audioKey(editingAudio.release_id, editingAudio.position, editingAudio.title)) : undefined}
+        onClose={() => setEditingAudio(null)}
+      />
     </View>
   );
 }
@@ -518,7 +557,32 @@ function TrackPicker({
   const [openId, setOpenId] = useState<number | null>(null);
   const [tracklist, setTracklist] = useState<Track[] | null>(null);
   const [tracklistLoading, setTracklistLoading] = useState(false);
+  const [bpmMin, setBpmMin] = useState('');
+  const [bpmMax, setBpmMax] = useState('');
   const openRef = useRef<number | null>(null);
+  const audio = useTrackAudio();
+
+  // BPM range filter: a record is shown if any of its tracks is in range.
+  const lo = bpmMin.trim() ? Number(bpmMin) : null;
+  const hi = bpmMax.trim() ? Number(bpmMax) : null;
+  const rangeActive = (lo != null && Number.isFinite(lo)) || (hi != null && Number.isFinite(hi));
+  const inRange = useCallback(
+    (bpm: number | null | undefined) =>
+      bpm != null &&
+      (lo == null || !Number.isFinite(lo) || bpm >= lo) &&
+      (hi == null || !Number.isFinite(hi) || bpm <= hi),
+    [lo, hi],
+  );
+  const releaseBpms = useMemo(() => {
+    const map = new Map<number, number[]>();
+    for (const a of audio.values()) {
+      if (a.bpm == null) continue;
+      const list = map.get(a.release_id) ?? [];
+      list.push(a.bpm);
+      map.set(a.release_id, list);
+    }
+    return map;
+  }, [audio]);
 
   useEffect(() => {
     if (collectionCache) return;
@@ -539,9 +603,12 @@ function TrackPicker({
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (records ?? []).filter(
-      (r) => matchesSelection(r, tags) && (!q || `${r.title} ${r.artists ?? ''}`.toLowerCase().includes(q)),
+      (r) =>
+        matchesSelection(r, tags) &&
+        (!q || `${r.title} ${r.artists ?? ''}`.toLowerCase().includes(q)) &&
+        (!rangeActive || (releaseBpms.get(r.discogs_release_id) ?? []).some(inRange)),
     );
-  }, [records, query, tags]);
+  }, [records, query, tags, rangeActive, releaseBpms, inRange]);
 
   const toggle = async (record: CollectionRecord) => {
     const id = record.discogs_release_id;
@@ -593,17 +660,24 @@ function TrackPicker({
             ) : tracks.length ? (
               tracks.map((track, i) => {
                 const added = existingKeys.has(trackKey(item.discogs_release_id, track.position, track.title));
+                const trackAudio = audio.get(audioKey(item.discogs_release_id, track.position, track.title));
+                const outOfRange = rangeActive && !inRange(trackAudio?.bpm);
                 return (
                   <Pressable
                     key={i}
                     disabled={added}
                     onPress={() => onAdd(item, track)}
-                    style={({ pressed }) => [styles.pickTrackRow, pressed && { opacity: 0.6 }]}
+                    style={({ pressed }) => [
+                      styles.pickTrackRow,
+                      outOfRange && { opacity: 0.4 },
+                      pressed && { opacity: 0.6 },
+                    ]}
                   >
                     <Text style={styles.pickPosition}>{track.position ?? ''}</Text>
                     <Text style={[styles.pickTrackTitle, added && { color: D.muted }]} numberOfLines={2}>
                       {track.title}
                     </Text>
+                    <AudioBadge audio={trackAudio} />
                     {track.duration ? <Text style={styles.trackDuration}>{track.duration}</Text> : null}
                     <View style={[styles.addCircle, added && styles.addCircleDone]}>
                       <Text style={styles.addCircleText}>{added ? '✓' : '+'}</Text>
@@ -633,6 +707,31 @@ function TrackPicker({
         returnKeyType="search"
       />
       {records ? <GenreStyleFilter items={records} value={tags} onChange={setTags} tone="dark" /> : null}
+      <View style={styles.bpmFilter}>
+        <Text style={styles.bpmFilterLabel}>BPM</Text>
+        <TextInput
+          style={styles.bpmFilterInput}
+          value={bpmMin}
+          onChangeText={setBpmMin}
+          placeholder="min"
+          placeholderTextColor={D.muted}
+          keyboardType="number-pad"
+        />
+        <Text style={styles.bpmFilterLabel}>–</Text>
+        <TextInput
+          style={styles.bpmFilterInput}
+          value={bpmMax}
+          onChangeText={setBpmMax}
+          placeholder="max"
+          placeholderTextColor={D.muted}
+          keyboardType="number-pad"
+        />
+        {rangeActive ? (
+          <Pressable onPress={() => { setBpmMin(''); setBpmMax(''); }} hitSlop={8}>
+            <Text style={styles.bpmFilterClear}>Clear</Text>
+          </Pressable>
+        ) : null}
+      </View>
       {!records ? (
         <View style={styles.center}><ActivityIndicator color={D.muted} /></View>
       ) : (
@@ -640,7 +739,7 @@ function TrackPicker({
           data={visible}
           keyExtractor={(r) => String(r.discogs_release_id)}
           renderItem={renderRecord}
-          extraData={[openId, tracklist, tracklistLoading, existingKeys]}
+          extraData={[openId, tracklist, tracklistLoading, existingKeys, audio, lo, hi]}
           contentContainerStyle={{ paddingHorizontal: PADDING, paddingBottom: insets.bottom + 32 }}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
@@ -778,6 +877,22 @@ const styles = StyleSheet.create({
   trackArtist: { fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 1 },
   trackAlbum: { fontSize: 11, color: D.muted, marginTop: 1 },
   trackDuration: { fontSize: 12, color: D.muted },
+  trackSide: { alignItems: 'flex-end', gap: 4 },
+  coverAudio: { position: 'absolute', right: 4, bottom: 4, backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 8 },
+  bpmFilter: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: PADDING, paddingBottom: 10 },
+  bpmFilterLabel: { fontSize: 13, color: D.muted, fontWeight: '600' },
+  bpmFilterInput: {
+    width: 64,
+    fontSize: 14,
+    color: '#fff',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: D.chip,
+    textAlign: 'center',
+    outlineStyle: 'none',
+  } as any,
+  bpmFilterClear: { fontSize: 13, color: D.muted, fontWeight: '500' },
   removeBtn: { paddingHorizontal: 4 },
   removeText: { fontSize: 13, color: D.muted },
   coverBadge: {

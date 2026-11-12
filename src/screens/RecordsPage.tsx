@@ -22,7 +22,9 @@ import {
 import { Text } from '@/components/Text';
 import { TextInput } from '@/components/TextInput';
 import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
+import { AudioBadge, AudioEditor, type AudioTrackRef } from '@/components/TrackAudio';
 import { getTracklist, type Track } from '@/lib/discogs';
+import { audioKey, backfillTrackAudio, loadTrackAudio, useTrackAudio, type TrackAudio } from '@/lib/trackAudio';
 import { fetchAllRows, supabase } from '@/lib/supabase';
 
 const C = {
@@ -88,10 +90,24 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function TrackRow({ track, nested = false }: { track: Track; nested?: boolean }) {
+function TrackRow({
+  track,
+  releaseId,
+  audio,
+  onEditAudio,
+  nested = false,
+}: {
+  track: Track;
+  releaseId: number;
+  audio: Map<string, TrackAudio>;
+  onEditAudio?: (track: Track) => void;
+  nested?: boolean;
+}) {
   if (track.type === 'heading') {
     return <Text style={styles.trackHeading}>{track.title}</Text>;
   }
+  // Index tracks with sub-tracks get their BPM on the sub-tracks instead.
+  const hasSubTracks = !!track.sub_tracks?.length;
   return (
     <>
       <View style={[styles.trackRow, nested && styles.trackRowNested]}>
@@ -100,9 +116,19 @@ function TrackRow({ track, nested = false }: { track: Track; nested?: boolean })
           <Text style={styles.trackTitle}>{track.title}</Text>
           {track.artists ? <Text style={styles.trackArtists}>{track.artists}</Text> : null}
         </View>
-        {track.duration ? <Text style={styles.trackDuration}>{track.duration}</Text> : null}
+        <View style={styles.trackSide}>
+          {!hasSubTracks ? (
+            <AudioBadge
+              audio={audio.get(audioKey(releaseId, track.position, track.title))}
+              onPress={onEditAudio ? () => onEditAudio(track) : undefined}
+            />
+          ) : null}
+          {track.duration ? <Text style={styles.trackDuration}>{track.duration}</Text> : null}
+        </View>
       </View>
-      {track.sub_tracks?.map((sub, i) => <TrackRow key={i} track={sub} nested />)}
+      {track.sub_tracks?.map((sub, i) => (
+        <TrackRow key={i} track={sub} releaseId={releaseId} audio={audio} onEditAudio={onEditAudio} nested />
+      ))}
     </>
   );
 }
@@ -137,7 +163,9 @@ export default function RecordsPage({ title, list, onEdgesChange }: RecordsPageP
   const [detailItem, setDetailItem] = useState<RecordItem | null>(null);
   const [tracklist, setTracklist] = useState<Track[] | null>(null);
   const [tracklistLoading, setTracklistLoading] = useState(false);
-  const [tracklistsPending, setTracklistsPending] = useState(0);
+  const [progress, setProgress] = useState<string | null>(null);
+  const [editingAudio, setEditingAudio] = useState<AudioTrackRef | null>(null);
+  const audio = useTrackAudio();
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -186,17 +214,27 @@ export default function RecordsPage({ title, list, onEdgesChange }: RecordsPageP
       // (Discogs allows 60 requests a minute), so keep going until none are left.
       let pending = data?.tracklists?.pending ?? 0;
       while (pending > 0 && mounted.current) {
-        setTracklistsPending(pending);
+        setProgress(`Fetching tracklists… ${pending} left`);
         data = await invoke({ tracklistsOnly: true });
         const next = data?.tracklists?.pending ?? 0;
         if (next >= pending && !data?.tracklists?.fetched) break;
         pending = next;
       }
+
+      // Then BPM and key for any new collection tracks, the same way.
+      let audioPending = Infinity;
+      while (mounted.current) {
+        const result = await backfillTrackAudio();
+        if (result.pending === 0 || (result.pending >= audioPending && !result.lookedUp)) break;
+        audioPending = result.pending;
+        setProgress(`Looking up BPM and key… ${audioPending} left`);
+      }
+      await loadTrackAudio(true);
     } catch (err) {
       if (mounted.current) setSyncError(err instanceof Error ? err.message : String(err));
     } finally {
       if (mounted.current) {
-        setTracklistsPending(0);
+        setProgress(null);
         setSyncing(false);
       }
     }
@@ -275,9 +313,7 @@ export default function RecordsPage({ title, list, onEdgesChange }: RecordsPageP
       </View>
 
       {syncError ? <Text style={styles.errorText}>{syncError}</Text> : null}
-      {tracklistsPending > 0 ? (
-        <Text style={styles.progressText}>Fetching tracklists… {tracklistsPending} left</Text>
-      ) : null}
+      {progress ? <Text style={styles.progressText}>{progress}</Text> : null}
 
       {items.length > 12 ? (
         <TextInput
@@ -367,7 +403,25 @@ export default function RecordsPage({ title, list, onEdgesChange }: RecordsPageP
                 {tracklistLoading ? (
                   <ActivityIndicator color="rgba(255,255,255,0.35)" style={{ marginVertical: 16 }} />
                 ) : tracklist?.length ? (
-                  tracklist.map((track, i) => <TrackRow key={i} track={track} />)
+                  tracklist.map((track, i) => (
+                    <TrackRow
+                      key={i}
+                      track={track}
+                      releaseId={detailItem.discogs_release_id}
+                      audio={audio}
+                      onEditAudio={
+                        list === 'collection'
+                          ? (t) =>
+                              setEditingAudio({
+                                release_id: detailItem.discogs_release_id,
+                                position: t.position,
+                                title: t.title,
+                                subtitle: t.artists ?? detailItem.artists,
+                              })
+                          : undefined
+                      }
+                    />
+                  ))
                 ) : (
                   <Text style={styles.trackEmpty}>No tracklist available</Text>
                 )}
@@ -396,6 +450,15 @@ export default function RecordsPage({ title, list, onEdgesChange }: RecordsPageP
               </Pressable>
             </ScrollView>
           ) : null}
+          <AudioEditor
+            track={editingAudio}
+            audio={
+              editingAudio
+                ? audio.get(audioKey(editingAudio.release_id, editingAudio.position, editingAudio.title))
+                : undefined
+            }
+            onClose={() => setEditingAudio(null)}
+          />
         </View>
       </Modal>
     </View>
@@ -455,6 +518,7 @@ const styles = StyleSheet.create({
   trackTitle: { fontSize: 14, color: 'rgba(255,255,255,0.85)', lineHeight: 19 },
   trackArtists: { fontSize: 12, color: 'rgba(255,255,255,0.45)', marginTop: 2 },
   trackDuration: { fontSize: 12, color: 'rgba(255,255,255,0.4)', paddingTop: 1 },
+  trackSide: { alignItems: 'flex-end', gap: 4 },
   trackHeading: {
     fontSize: 12,
     color: 'rgba(255,255,255,0.55)',
