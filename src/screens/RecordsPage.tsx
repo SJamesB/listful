@@ -16,6 +16,7 @@ import {
 import { Text } from '@/components/Text';
 import { TextInput } from '@/components/TextInput';
 import { useSectionEdgeScroll, type EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
+import { getTracklist, type Track } from '@/lib/discogs';
 import { fetchAllRows, supabase } from '@/lib/supabase';
 
 const C = {
@@ -46,15 +47,6 @@ interface RecordItem {
   rating: number | null;
   date_added: string | null;
   synced_at: string;
-}
-
-interface Track {
-  position: string | null;
-  title: string;
-  duration: string | null;
-  type: 'track' | 'heading' | 'index';
-  artists: string | null;
-  sub_tracks?: Track[];
 }
 
 interface SyncResponse {
@@ -213,20 +205,8 @@ export default function RecordsPage({ title, list, onEdgesChange }: RecordsPageP
     setTracklistLoading(true);
     const isCurrent = () => openReleaseId.current === item.discogs_release_id;
     try {
-      const { data: stored } = await supabase
-        .from('discogs_releases')
-        .select('tracklist')
-        .eq('release_id', item.discogs_release_id)
-        .maybeSingle();
-      if (stored) {
-        if (isCurrent()) setTracklist(stored.tracklist as Track[]);
-        return;
-      }
-      // Not backfilled yet: have the edge function fetch and store it now.
-      const { data } = await supabase.functions.invoke<{ tracklist?: Track[]; error?: string }>('discogs-sync', {
-        body: { releaseId: item.discogs_release_id },
-      });
-      if (data?.tracklist && isCurrent()) setTracklist(data.tracklist);
+      const tracks = await getTracklist(item.discogs_release_id);
+      if (tracks && isCurrent()) setTracklist(tracks);
     } finally {
       if (isCurrent()) setTracklistLoading(false);
     }

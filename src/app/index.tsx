@@ -31,6 +31,7 @@ import DeadheadSongsPage, { type DeadheadSongsPageHandle } from '@/screens/Deadh
 import DeadheadTransitionsPage from '@/screens/DeadheadTransitionsPage';
 import LibraryBookPage, { type LibraryBookPageProps } from '@/screens/LibraryBookPage';
 import RecordsPage from '@/screens/RecordsPage';
+import SetsPage from '@/screens/SetsPage';
 import VideogamePosterPage, { type VideogamePosterPageProps } from '@/screens/VideogamePosterPage';
 import EntertainmentPage from '@/screens/entertainment';
 import HabitsPage from '@/screens/habits';
@@ -67,6 +68,7 @@ const VIDEOGAMES_MENU_ITEMS = [
 const RECORDS_MENU_ITEMS = [
   { localIndex: 0, label: '💿 Collection' },
   { localIndex: 1, label: '⭐ Wantlist' },
+  { localIndex: 2, label: '🎧 Sets' },
 ];
 
 // Defined at module level so their identity is stable and the pager never remounts them.
@@ -79,6 +81,7 @@ function RecordsWantlistPage({ onEdgesChange }: { onEdgesChange?: EdgesChangeHan
 const RECORDS_DATA: SectionItem[] = [
   { id: 'records-collection', Component: RecordsCollectionPage },
   { id: 'records-wantlist', Component: RecordsWantlistPage },
+  { id: 'records-sets', Component: SetsPage },
 ];
 
 const DEADHEAD_MENU_ITEMS = [
