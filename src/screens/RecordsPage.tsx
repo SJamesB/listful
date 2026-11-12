@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -48,6 +48,20 @@ interface RecordItem {
   synced_at: string;
 }
 
+interface Track {
+  position: string | null;
+  title: string;
+  duration: string | null;
+  type: 'track' | 'heading' | 'index';
+  artists: string | null;
+  sub_tracks?: Track[];
+}
+
+interface SyncResponse {
+  error?: string;
+  tracklists?: { fetched: number; pending: number };
+}
+
 export interface RecordsPageProps {
   title: string;
   list: RecordList;
@@ -73,6 +87,25 @@ function DetailRow({ label, value }: { label: string; value: string }) {
       <Text style={styles.detailLabel}>{label}</Text>
       <Text style={styles.detailValue} numberOfLines={4}>{value}</Text>
     </View>
+  );
+}
+
+function TrackRow({ track, nested = false }: { track: Track; nested?: boolean }) {
+  if (track.type === 'heading') {
+    return <Text style={styles.trackHeading}>{track.title}</Text>;
+  }
+  return (
+    <>
+      <View style={[styles.trackRow, nested && styles.trackRowNested]}>
+        <Text style={styles.trackPosition}>{track.position ?? ''}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.trackTitle}>{track.title}</Text>
+          {track.artists ? <Text style={styles.trackArtists}>{track.artists}</Text> : null}
+        </View>
+        {track.duration ? <Text style={styles.trackDuration}>{track.duration}</Text> : null}
+      </View>
+      {track.sub_tracks?.map((sub, i) => <TrackRow key={i} track={sub} nested />)}
+    </>
   );
 }
 
@@ -103,6 +136,17 @@ export default function RecordsPage({ title, list, onEdgesChange }: RecordsPageP
   const [syncError, setSyncError] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
   const [detailItem, setDetailItem] = useState<RecordItem | null>(null);
+  const [tracklist, setTracklist] = useState<Track[] | null>(null);
+  const [tracklistLoading, setTracklistLoading] = useState(false);
+  const [tracklistsPending, setTracklistsPending] = useState(0);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const load = useCallback(async () => {
     const rows = await fetchAllRows<RecordItem>((from, to) =>
@@ -130,15 +174,68 @@ export default function RecordsPage({ title, list, onEdgesChange }: RecordsPageP
     setSyncing(true);
     setSyncError(null);
     try {
-      const { data, error } = await supabase.functions.invoke('discogs-sync', { body: {} });
-      if (error) throw new Error(error.message);
-      if (data?.error) throw new Error(data.error);
+      const invoke = async (body: object) => {
+        const { data, error } = await supabase.functions.invoke<SyncResponse>('discogs-sync', { body });
+        if (error) throw new Error(error.message);
+        if (data?.error) throw new Error(data.error);
+        return data;
+      };
+      let data = await invoke({});
       syncListeners.forEach((reload) => reload());
+
+      // Each call only fetches the tracklists that fit in its time budget
+      // (Discogs allows 60 requests a minute), so keep going until none are left.
+      let pending = data?.tracklists?.pending ?? 0;
+      while (pending > 0 && mounted.current) {
+        setTracklistsPending(pending);
+        data = await invoke({ tracklistsOnly: true });
+        const next = data?.tracklists?.pending ?? 0;
+        if (next >= pending && !data?.tracklists?.fetched) break;
+        pending = next;
+      }
     } catch (err) {
-      setSyncError(err instanceof Error ? err.message : String(err));
+      if (mounted.current) setSyncError(err instanceof Error ? err.message : String(err));
     } finally {
-      setSyncing(false);
+      if (mounted.current) {
+        setTracklistsPending(0);
+        setSyncing(false);
+      }
     }
+  };
+
+  // Ignore tracklist responses for a record that's no longer the open one.
+  const openReleaseId = useRef<number | null>(null);
+
+  const openDetail = async (item: RecordItem) => {
+    openReleaseId.current = item.discogs_release_id;
+    setDetailItem(item);
+    setTracklist(null);
+    setTracklistLoading(true);
+    const isCurrent = () => openReleaseId.current === item.discogs_release_id;
+    try {
+      const { data: stored } = await supabase
+        .from('discogs_releases')
+        .select('tracklist')
+        .eq('release_id', item.discogs_release_id)
+        .maybeSingle();
+      if (stored) {
+        if (isCurrent()) setTracklist(stored.tracklist as Track[]);
+        return;
+      }
+      // Not backfilled yet: have the edge function fetch and store it now.
+      const { data } = await supabase.functions.invoke<{ tracklist?: Track[]; error?: string }>('discogs-sync', {
+        body: { releaseId: item.discogs_release_id },
+      });
+      if (data?.tracklist && isCurrent()) setTracklist(data.tracklist);
+    } finally {
+      if (isCurrent()) setTracklistLoading(false);
+    }
+  };
+
+  const closeDetail = () => {
+    openReleaseId.current = null;
+    setDetailItem(null);
+    setTracklist(null);
   };
 
   const visible = useMemo(() => {
@@ -155,7 +252,7 @@ export default function RecordsPage({ title, list, onEdgesChange }: RecordsPageP
   );
 
   const renderItem = ({ item }: { item: RecordItem }) => (
-    <Pressable style={[styles.coverWrap, { width: coverSize }]} onPress={() => setDetailItem(item)}>
+    <Pressable style={[styles.coverWrap, { width: coverSize }]} onPress={() => openDetail(item)}>
       <Cover uri={item.cover_url ?? item.thumb_url} size={coverSize} />
     </Pressable>
   );
@@ -189,6 +286,9 @@ export default function RecordsPage({ title, list, onEdgesChange }: RecordsPageP
       </View>
 
       {syncError ? <Text style={styles.errorText}>{syncError}</Text> : null}
+      {tracklistsPending > 0 ? (
+        <Text style={styles.progressText}>Fetching tracklists… {tracklistsPending} left</Text>
+      ) : null}
 
       {items.length > 12 ? (
         <TextInput
@@ -240,7 +340,7 @@ export default function RecordsPage({ title, list, onEdgesChange }: RecordsPageP
         animationType="fade"
         transparent
         presentationStyle="overFullScreen"
-        onRequestClose={() => setDetailItem(null)}
+        onRequestClose={closeDetail}
       >
         <View style={styles.detailOverlay}>
           {detailItem?.cover_url ? (
@@ -256,7 +356,7 @@ export default function RecordsPage({ title, list, onEdgesChange }: RecordsPageP
             locations={[0, 0.55]}
             style={StyleSheet.absoluteFill}
           />
-          <Pressable style={styles.detailClose} onPress={() => setDetailItem(null)} hitSlop={12}>
+          <Pressable style={styles.detailClose} onPress={closeDetail} hitSlop={12}>
             <Text style={styles.detailCloseText}>✕</Text>
           </Pressable>
           {detailItem ? (
@@ -271,6 +371,17 @@ export default function RecordsPage({ title, list, onEdgesChange }: RecordsPageP
               <Text style={styles.detailTitle}>{detailItem.title}</Text>
               {detailItem.artists ? <Text style={styles.detailArtist}>{detailItem.artists}</Text> : null}
               {detailMeta ? <Text style={styles.detailMetaText}>{detailMeta}</Text> : null}
+
+              <View style={styles.tracklist}>
+                <Text style={styles.tracklistLabel}>Tracklist</Text>
+                {tracklistLoading ? (
+                  <ActivityIndicator color="rgba(255,255,255,0.35)" style={{ marginVertical: 16 }} />
+                ) : tracklist?.length ? (
+                  tracklist.map((track, i) => <TrackRow key={i} track={track} />)
+                ) : (
+                  <Text style={styles.trackEmpty}>No tracklist available</Text>
+                )}
+              </View>
 
               <View style={styles.detailFields}>
                 {detailItem.labels ? <DetailRow label="Label" value={detailItem.labels} /> : null}
@@ -324,6 +435,44 @@ const styles = StyleSheet.create({
   },
   syncBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
   errorText: { fontSize: 12, color: C.danger, paddingHorizontal: PADDING, marginBottom: 8 },
+  progressText: { fontSize: 12, color: C.muted, paddingHorizontal: PADDING, marginBottom: 8 },
+  // Tracklist
+  tracklist: { width: '100%', marginBottom: 28 },
+  tracklistLabel: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.3)',
+    fontWeight: '600',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: 6,
+  },
+  trackRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    paddingVertical: 9,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.07)',
+  },
+  trackRowNested: { paddingLeft: 18 },
+  trackPosition: {
+    width: 30,
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.35)',
+    fontWeight: '600',
+    paddingTop: 1,
+  },
+  trackTitle: { fontSize: 14, color: 'rgba(255,255,255,0.85)', lineHeight: 19 },
+  trackArtists: { fontSize: 12, color: 'rgba(255,255,255,0.45)', marginTop: 2 },
+  trackDuration: { fontSize: 12, color: 'rgba(255,255,255,0.4)', paddingTop: 1 },
+  trackHeading: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.55)',
+    fontWeight: '700',
+    marginTop: 14,
+    marginBottom: 2,
+  },
+  trackEmpty: { fontSize: 13, color: 'rgba(255,255,255,0.4)', paddingVertical: 10 },
   filterInput: {
     fontSize: 14,
     color: C.text,
