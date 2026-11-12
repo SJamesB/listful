@@ -403,21 +403,30 @@ function SetDetail({ setId, onClose }: { setId: string; onClose: () => void }) {
     );
   };
 
-  const renderCover = ({ item, index }: { item: SetTrack; index: number }) => (
+  // Covers view: each album once, in the order it first appears in the set.
+  const albums = useMemo(() => {
+    const byRelease = new Map<number, { track: SetTrack; count: number }>();
+    for (const t of tracks) {
+      const entry = byRelease.get(t.release_id);
+      if (entry) entry.count++;
+      else byRelease.set(t.release_id, { track: t, count: 1 });
+    }
+    return [...byRelease.values()];
+  }, [tracks]);
+
+  const renderCover = ({ item, index }: { item: { track: SetTrack; count: number }; index: number }) => (
     <View style={{ width: coverSize, marginBottom: 12 }}>
       <View>
-        <Thumb uri={item.cover_url} size={coverSize} radius={4} />
+        <Thumb uri={item.track.cover_url} size={coverSize} radius={4} />
         <View style={styles.coverBadge}>
           <Text style={styles.coverBadgeText}>{index + 1}</Text>
         </View>
-        {audioFor(item)?.bpm != null || audioFor(item)?.musical_key != null ? (
-          <View style={styles.coverAudio}>
-            <AudioBadge audio={audioFor(item)} onPress={() => editAudio(item)} />
-          </View>
-        ) : null}
       </View>
-      <Text style={styles.coverTitle} numberOfLines={1}>{item.track_title}</Text>
-      <Text style={styles.coverArtist} numberOfLines={1}>{item.track_artists ?? item.album_artists}</Text>
+      <Text style={styles.coverTitle} numberOfLines={1}>{item.track.album_title}</Text>
+      <Text style={styles.coverArtist} numberOfLines={1}>
+        {item.track.album_artists}
+        {item.count > 1 ? ` · ${item.count} tracks` : ''}
+      </Text>
     </View>
   );
 
@@ -514,10 +523,9 @@ function SetDetail({ setId, onClose }: { setId: string; onClose: () => void }) {
       ) : (
         <FlatList
           key="grid"
-          data={tracks}
-          keyExtractor={(t) => t.id}
+          data={albums}
+          keyExtractor={(a) => String(a.track.release_id)}
           renderItem={renderCover}
-          extraData={audio}
           numColumns={GRID_COLS}
           columnWrapperStyle={{ gap: GAP }}
           contentContainerStyle={{ paddingHorizontal: PADDING, paddingTop: 4 }}
@@ -878,7 +886,6 @@ const styles = StyleSheet.create({
   trackAlbum: { fontSize: 11, color: D.muted, marginTop: 1 },
   trackDuration: { fontSize: 12, color: D.muted },
   trackSide: { alignItems: 'flex-end', gap: 4 },
-  coverAudio: { position: 'absolute', right: 4, bottom: 4, backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 8 },
   bpmFilter: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: PADDING, paddingBottom: 10 },
   bpmFilterLabel: { fontSize: 13, color: D.muted, fontWeight: '600' },
   bpmFilterInput: {
