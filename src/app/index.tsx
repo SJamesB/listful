@@ -21,7 +21,7 @@ import {
   VIDEOGAMES_BG,
 } from '@/constants/sectionBackgrounds';
 import type { EdgesChangeHandler } from '@/hooks/use-section-edge-scroll';
-import { makeConfig, sortCategoryKeys, type CategoryConfig } from '@/lib/logCategories';
+import { CATEGORIES, makeConfig, sortCategoryKeys, type CategoryConfig } from '@/lib/logCategories';
 import { supabase } from '@/lib/supabase';
 import { LogPage } from '@/screens/LogPage';
 import NotesPage, { type Note, type NotesPageHandle } from '@/screens/NotesPage';
@@ -164,7 +164,10 @@ export default function App() {
       .select('category')
       .then(({ data }) => {
         if (!data) return;
-        const keys = sortCategoryKeys([...new Set(data.map((r) => r.category as string))]);
+        // Built-in categories always get a page, even before their first entry.
+        const keys = sortCategoryKeys([
+          ...new Set([...Object.keys(CATEGORIES), ...data.map((r) => r.category as string)]),
+        ]);
         setVaultConfigs(keys.map(makeConfig));
       });
   }, []);
