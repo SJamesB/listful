@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -140,8 +140,21 @@ export function LogPage({ config, onEdgesChange }: Props) {
   const [eRating, setERating] = useState<number | null>(null);
   const [eTags, setETags] = useState<string[]>([]);
 
+  // Tag filter: an entry is shown when it has any of the selected tags.
+  const [filterTags, setFilterTags] = useState<string[]>([]);
+
   const submitting = useRef(false);
   const availableTags = config.tags ?? [];
+
+  const visibleEntries = useMemo(
+    () => filterTags.length === 0
+      ? entries
+      : entries.filter((e) => e.tags?.some((t) => filterTags.includes(t))),
+    [entries, filterTags],
+  );
+
+  const toggleFilterTag = (tag: string) =>
+    setFilterTags((p) => p.includes(tag) ? p.filter((x) => x !== tag) : [...p, tag]);
 
   const load = useCallback(async () => {
     const { data, error } = await supabase
@@ -235,8 +248,33 @@ export function LogPage({ config, onEdgesChange }: Props) {
 
             <View style={styles.header}>
               <Text style={styles.pageTitle}>{config.title}</Text>
-              {entries.length > 0 && <Text style={styles.count}>{entries.length}</Text>}
+              {entries.length > 0 && (
+                <Text style={styles.count}>
+                  {filterTags.length > 0 ? `${visibleEntries.length} of ${entries.length}` : entries.length}
+                </Text>
+              )}
             </View>
+
+            {availableTags.length > 0 && (
+              <View style={styles.filterRow}>
+                <Pressable
+                  onPress={() => setFilterTags([])}
+                  style={[styles.filterBtn, filterTags.length === 0 && { backgroundColor: config.accent, borderColor: config.accent }]}>
+                  <Text style={[styles.filterText, { color: filterTags.length === 0 ? '#FFF' : MUTED }]}>All</Text>
+                </Pressable>
+                {availableTags.map((tag) => {
+                  const active = filterTags.includes(tag);
+                  return (
+                    <Pressable
+                      key={tag}
+                      onPress={() => toggleFilterTag(tag)}
+                      style={[styles.filterBtn, active && { backgroundColor: config.accent, borderColor: config.accent }]}>
+                      <Text style={[styles.filterText, { color: active ? '#FFF' : MUTED }]}>{tag}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
 
             {/* Add row */}
             <View style={styles.addRow}>
@@ -260,8 +298,11 @@ export function LogPage({ config, onEdgesChange }: Props) {
             {entries.length === 0 && !adding && (
               <Text style={styles.empty}>no entries yet</Text>
             )}
+            {entries.length > 0 && visibleEntries.length === 0 && (
+              <Text style={styles.empty}>no entries with these tags</Text>
+            )}
 
-            {entries.map((entry) =>
+            {visibleEntries.map((entry) =>
               editingId === entry.id ? (
                 <View key={entry.id} style={styles.editContainer}>
                   <EntryForm
@@ -308,7 +349,10 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'baseline', gap: 10, marginBottom: 24 },
   pageTitle: { fontSize: 17, fontWeight: '600', color: TEXT, letterSpacing: -0.3 },
   count: { fontSize: 11, fontWeight: '500', color: MUTED },
-  empty: { fontSize: 11, color: MUTED, marginBottom: 16 },
+  empty: { fontSize: 11, color: MUTED, marginTop: 12, marginBottom: 16 },
+  filterRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginTop: -8, marginBottom: 20 },
+  filterBtn: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 20, borderWidth: 1, borderColor: BORDER },
+  filterText: { fontSize: 10, fontWeight: '500' },
   row: {
     flexDirection: 'row', alignItems: 'flex-start',
     paddingVertical: 12, gap: 12,
