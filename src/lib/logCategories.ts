@@ -59,7 +59,7 @@ export const CATEGORIES = {
   },
   '🍸 drinks & restaurants': {
     key: '🍸 drinks & restaurants',
-    title: '🍸 Drinks & Restaurants',
+    title: '🍸 Eat Out To Help Out',
     titleLabel: 'Place',
     subtitleLabel: 'Location',
     gradient1: ['#FDBA74', '#F9A8D4', '#C4B5FD', '#FDBA74'],
