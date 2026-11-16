@@ -57,9 +57,9 @@ export const CATEGORIES = {
     accent: '#16A34A',
     tags: ['Bird', 'Land', 'Marine', 'Bird of Prey', 'Eagle', 'Mammal', 'Monkey', 'Fish', 'Shark', 'Whale', 'Reptile', 'Amphibian', 'Rodent', 'Spider', 'Tropical', 'Woodpecker', 'Owl', 'Ray'],
   },
-  '🍸 drinks & restaurants': {
-    key: '🍸 drinks & restaurants',
-    title: '🍸 Drinks & Restaurants',
+  '🍺 eat out to help out': {
+    key: '🍺 eat out to help out',
+    title: '🍺 Eat Out To Help Out',
     titleLabel: 'Place',
     subtitleLabel: 'Location',
     gradient1: ['#FDBA74', '#F9A8D4', '#C4B5FD', '#FDBA74'],
@@ -67,11 +67,31 @@ export const CATEGORIES = {
     accent: '#E11D48',
     tags: ['Bar', 'Pub', 'Restaurant', 'Cafe'],
   },
+  '🎲 boardgames': {
+    key: '🎲 boardgames',
+    title: '🎲 Boardgames',
+    titleLabel: 'Game',
+    subtitleLabel: 'Publisher',
+    gradient1: ['#A5F3FC', '#C4B5FD', '#FDE68A', '#A5F3FC'],
+    gradient2: ['#34D399', 'transparent', '#818CF8'],
+    accent: '#4F46E5',
+    tags: ['Strategy', 'Party', 'Co-op', 'Card', 'Family', 'Deck-building', 'Worker Placement'],
+  },
+  '🎭 theatre': {
+    key: '🎭 theatre',
+    title: '🎭 Theatre',
+    titleLabel: 'Show',
+    subtitleLabel: 'Theatre',
+    gradient1: ['#FECACA', '#FBCFE8', '#FDE68A', '#FECACA'],
+    gradient2: ['#B91C1C', 'transparent', '#F59E0B'],
+    accent: '#BE123C',
+    tags: ['Musical', 'Play', 'Comedy', 'Drama', 'Opera', 'Ballet'],
+  },
 } satisfies Record<string, CategoryConfig>;
 
 // Display order for Vault sections. Unknown categories are appended
 // alphabetically after these.
-const CATEGORY_ORDER = ['🎤 gig', '🍵 tea', '🌶️ chilli', '🐸 wildlife', '🌍 countries', '🍸 drinks & restaurants'];
+const CATEGORY_ORDER = ['🎤 gig', '🍵 tea', '🌶️ chilli', '🐸 wildlife', '🌍 countries', '🍺 eat out to help out', '🎲 boardgames', '🎭 theatre'];
 
 export function sortCategoryKeys(keys: string[]): string[] {
   return [...keys].sort((a, b) => {
