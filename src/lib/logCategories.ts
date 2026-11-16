@@ -57,8 +57,8 @@ export const CATEGORIES = {
     accent: '#16A34A',
     tags: ['Bird', 'Land', 'Marine', 'Bird of Prey', 'Eagle', 'Mammal', 'Monkey', 'Fish', 'Shark', 'Whale', 'Reptile', 'Amphibian', 'Rodent', 'Spider', 'Tropical', 'Woodpecker', 'Owl', 'Ray'],
   },
-  '🍸 drinks & restaurants': {
-    key: '🍸 drinks & restaurants',
+  '🍺 eat out to help out': {
+    key: '🍺 eat out to help out',
     title: '🍺 Eat Out To Help Out',
     titleLabel: 'Place',
     subtitleLabel: 'Location',
@@ -91,7 +91,7 @@ export const CATEGORIES = {
 
 // Display order for Vault sections. Unknown categories are appended
 // alphabetically after these.
-const CATEGORY_ORDER = ['🎤 gig', '🍵 tea', '🌶️ chilli', '🐸 wildlife', '🌍 countries', '🍸 drinks & restaurants', '🎲 boardgames', '🎭 theatre'];
+const CATEGORY_ORDER = ['🎤 gig', '🍵 tea', '🌶️ chilli', '🐸 wildlife', '🌍 countries', '🍺 eat out to help out', '🎲 boardgames', '🎭 theatre'];
 
 export function sortCategoryKeys(keys: string[]): string[] {
   return [...keys].sort((a, b) => {
