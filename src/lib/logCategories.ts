@@ -67,11 +67,31 @@ export const CATEGORIES = {
     accent: '#E11D48',
     tags: ['Bar', 'Pub', 'Restaurant', 'Cafe'],
   },
+  '🎲 boardgames': {
+    key: '🎲 boardgames',
+    title: '🎲 Boardgames',
+    titleLabel: 'Game',
+    subtitleLabel: 'Publisher',
+    gradient1: ['#A5F3FC', '#C4B5FD', '#FDE68A', '#A5F3FC'],
+    gradient2: ['#34D399', 'transparent', '#818CF8'],
+    accent: '#4F46E5',
+    tags: ['Strategy', 'Party', 'Co-op', 'Card', 'Family', 'Deck-building', 'Worker Placement'],
+  },
+  '🎭 theatre': {
+    key: '🎭 theatre',
+    title: '🎭 Theatre',
+    titleLabel: 'Show',
+    subtitleLabel: 'Theatre',
+    gradient1: ['#FECACA', '#FBCFE8', '#FDE68A', '#FECACA'],
+    gradient2: ['#B91C1C', 'transparent', '#F59E0B'],
+    accent: '#BE123C',
+    tags: ['Musical', 'Play', 'Comedy', 'Drama', 'Opera', 'Ballet'],
+  },
 } satisfies Record<string, CategoryConfig>;
 
 // Display order for Vault sections. Unknown categories are appended
 // alphabetically after these.
-const CATEGORY_ORDER = ['🎤 gig', '🍵 tea', '🌶️ chilli', '🐸 wildlife', '🌍 countries', '🍸 drinks & restaurants'];
+const CATEGORY_ORDER = ['🎤 gig', '🍵 tea', '🌶️ chilli', '🐸 wildlife', '🌍 countries', '🍸 drinks & restaurants', '🎲 boardgames', '🎭 theatre'];
 
 export function sortCategoryKeys(keys: string[]): string[] {
   return [...keys].sort((a, b) => {
