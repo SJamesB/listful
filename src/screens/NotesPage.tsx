@@ -14,6 +14,7 @@ import {
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
+import RichNoteEditor from '@/components/RichNoteEditor';
 import { Text } from '@/components/Text';
 import { TextInput } from '@/components/TextInput';
 import { supabase } from '@/lib/supabase';
@@ -74,10 +75,74 @@ function serializeChecklist(items: ChecklistItem[]): string {
   return JSON.stringify({ type: 'checklist', items });
 }
 
+// Formatted text notes are stored as {"type":"rich","html":"..."}; older text
+// notes are plain strings and are converted to HTML when opened.
+function richHtml(content: string): string | null {
+  if (!content?.trim().startsWith('{')) return null;
+  try {
+    const p = JSON.parse(content);
+    if (p?.type === 'rich' && typeof p.html === 'string') return p.html;
+  } catch {}
+  return null;
+}
+
+function serializeRich(html: string): string {
+  return html ? JSON.stringify({ type: 'rich', html }) : '';
+}
+
+const escapeHtml = (t: string) =>
+  t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+function textToHtml(text: string): string {
+  if (!text) return '';
+  return text.split('\n').map((line) => `<div>${line ? escapeHtml(line) : '<br>'}</div>`).join('');
+}
+
+function htmlToText(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(div|p|h1|h2)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/\n+$/, '');
+}
+
+/** Plain text of a text note, whether it's stored as rich HTML or a plain string. */
+function noteText(content: string): string {
+  const html = richHtml(content);
+  return html === null ? content : htmlToText(html);
+}
+
 function contentPreview(content: string): string {
   const { type, items } = parseContent(content);
   if (type === 'checklist') return items.map(i => (i.done ? '✓ ' : '• ') + i.text).join('\n');
-  return content;
+  return noteText(content);
+}
+
+function RichTextBody({ content, onChange }: { content: string; onChange: (content: string) => void }) {
+  // Captured once on mount: the editor owns its content after that.
+  const [initialHtml] = useState(() => richHtml(content) ?? textToHtml(content));
+  return (
+    <View style={styles.contentWrap}>
+      <RichNoteEditor
+        initialHtml={initialHtml}
+        placeholder="Start writing…"
+        onChangeHtml={(html) => onChange(serializeRich(html))}
+        dom={{
+          style: { flex: 1 },
+          containerStyle: { flex: 1 },
+          scrollEnabled: false,
+          keyboardDisplayRequiresUserAction: false,
+          hideKeyboardAccessoryView: true,
+        }}
+      />
+    </View>
+  );
 }
 
 const CREATE_ID = '__create__' as const;
@@ -139,7 +204,7 @@ function NoteCard({
   };
 
   const switchToChecklist = () => {
-    const lines = note.content.split('\n').filter(l => l.trim());
+    const lines = noteText(note.content).split('\n').filter(l => l.trim());
     updateItems(lines.map(text => ({ id: genId(), text, done: false })));
   };
 
@@ -236,18 +301,11 @@ function NoteCard({
             )}
           </ScrollView>
         ) : (
-          <View style={styles.contentWrap}>
-            <TextInput
-              style={styles.contentInput}
-              value={note.content}
-              onChangeText={(v) => onUpdate(note.id, { content: v })}
-              placeholder="Start writing…"
-              placeholderTextColor={C.muted}
-              multiline
-              textAlignVertical="top"
-              scrollEnabled
-            />
-          </View>
+          <RichTextBody
+            key={note.id}
+            content={note.content}
+            onChange={(content) => onUpdate(note.id, { content })}
+          />
         )}
 
         <Text style={styles.dateText}>{formatDate(note.created_at)}</Text>
@@ -716,15 +774,6 @@ const styles = StyleSheet.create({
   contentWrap: {
     flex: 1,
     minHeight: 0,
-  },
-  contentInput: {
-    flex: 1,
-    height: '100%',
-    fontSize: 16,
-    color: C.text,
-    lineHeight: 24,
-    padding: 0,
-    textAlignVertical: 'top',
   },
   dateText: {
     fontSize: 12,
