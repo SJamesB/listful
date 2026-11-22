@@ -236,16 +236,18 @@ function NoteCard({
             )}
           </ScrollView>
         ) : (
-          <TextInput
-            style={styles.contentInput}
-            value={note.content}
-            onChangeText={(v) => onUpdate(note.id, { content: v })}
-            placeholder="Start writing…"
-            placeholderTextColor={C.muted}
-            multiline
-            textAlignVertical="top"
-            scrollEnabled
-          />
+          <View style={styles.contentWrap}>
+            <TextInput
+              style={styles.contentInput}
+              value={note.content}
+              onChangeText={(v) => onUpdate(note.id, { content: v })}
+              placeholder="Start writing…"
+              placeholderTextColor={C.muted}
+              multiline
+              textAlignVertical="top"
+              scrollEnabled
+            />
+          </View>
         )}
 
         <Text style={styles.dateText}>{formatDate(note.created_at)}</Text>
@@ -668,14 +670,19 @@ const styles = StyleSheet.create({
   // Note pager
   page: {
     flex: 1,
-    paddingHorizontal: 28,
-    paddingBottom: 28,
-    paddingTop: 8,
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+    paddingTop: 4,
   },
   card: {
     flex: 1,
     borderRadius: 20,
     padding: 20,
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 4,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -706,8 +713,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(44,26,14,0.1)',
     marginBottom: 12,
   },
+  contentWrap: {
+    flex: 1,
+    minHeight: 0,
+  },
   contentInput: {
     flex: 1,
+    height: '100%',
     fontSize: 16,
     color: C.text,
     lineHeight: 24,
