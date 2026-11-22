@@ -21,6 +21,26 @@ const MUTED = 'rgba(44,26,14,0.45)';
 const FONT = 'Inter_400Regular, Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
 const FONT_BOLD = 'Inter_700Bold, Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
 
+// Whether the formatting buttons are shown is remembered across notes (and
+// kept in sync between the editors mounted side by side in the pager).
+const TOOLBAR_KEY = 'listful.notes.formatToolbar';
+const TOOLBAR_EVENT = 'listful-format-toolbar';
+
+function readToolbarOpen(): boolean {
+  try {
+    return window.localStorage.getItem(TOOLBAR_KEY) !== 'hidden';
+  } catch {
+    return true;
+  }
+}
+
+function writeToolbarOpen(open: boolean) {
+  try {
+    window.localStorage.setItem(TOOLBAR_KEY, open ? 'shown' : 'hidden');
+  } catch {}
+  window.dispatchEvent(new CustomEvent(TOOLBAR_EVENT, { detail: open }));
+}
+
 const ALLOWED_TAGS = new Set(['B', 'STRONG', 'I', 'EM', 'U', 'H1', 'H2', 'DIV', 'P', 'BR']);
 
 // Rebuilds the HTML keeping only the formatting tags the editor supports, with
@@ -67,6 +87,15 @@ export default function RichNoteEditor({ initialHtml, placeholder, onChangeHtml 
     bold: false, italic: false, underline: false, h1: false, h2: false,
   });
   const [empty, setEmpty] = useState(!initialHtml);
+  const [toolsOpen, setToolsOpen] = useState(readToolbarOpen);
+
+  useEffect(() => {
+    const sync = (e: Event) => setToolsOpen((e as CustomEvent<boolean>).detail);
+    window.addEventListener(TOOLBAR_EVENT, sync);
+    return () => window.removeEventListener(TOOLBAR_EVENT, sync);
+  }, []);
+
+  const toggleTools = () => writeToolbarOpen(!toolsOpen);
 
   useEffect(() => {
     const el = editorRef.current;
@@ -116,22 +145,35 @@ export default function RichNoteEditor({ initialHtml, placeholder, onChangeHtml 
   return (
     <div style={styles.root}>
       <div style={styles.toolbar}>
-        <ToolButton label="Bold" active={active.bold} onPress={() => apply('bold')}>
-          <span style={{ fontFamily: FONT_BOLD, fontWeight: 700 }}>B</span>
-        </ToolButton>
-        <ToolButton label="Italic" active={active.italic} onPress={() => apply('italic')}>
-          <span style={{ fontStyle: 'italic', fontFamily: 'Georgia, serif' }}>I</span>
-        </ToolButton>
-        <ToolButton label="Underline" active={active.underline} onPress={() => apply('underline')}>
-          <span style={{ textDecoration: 'underline' }}>U</span>
-        </ToolButton>
-        <div style={styles.toolbarGap} />
-        <ToolButton label="Heading" active={active.h1} onPress={() => apply('h1')}>
-          <span style={{ fontFamily: FONT_BOLD, fontWeight: 700 }}>H1</span>
-        </ToolButton>
-        <ToolButton label="Subheading" active={active.h2} onPress={() => apply('h2')}>
-          <span style={{ fontFamily: FONT_BOLD, fontWeight: 700, fontSize: 13 }}>H2</span>
-        </ToolButton>
+        {toolsOpen ? (
+          <>
+            <ToolButton label="Bold" active={active.bold} onPress={() => apply('bold')}>
+              <span style={{ fontFamily: FONT_BOLD, fontWeight: 700 }}>B</span>
+            </ToolButton>
+            <ToolButton label="Italic" active={active.italic} onPress={() => apply('italic')}>
+              <span style={{ fontStyle: 'italic', fontFamily: 'Georgia, serif' }}>I</span>
+            </ToolButton>
+            <ToolButton label="Underline" active={active.underline} onPress={() => apply('underline')}>
+              <span style={{ textDecoration: 'underline' }}>U</span>
+            </ToolButton>
+            <div style={styles.toolbarGap} />
+            <ToolButton label="Heading" active={active.h1} onPress={() => apply('h1')}>
+              <span style={{ fontFamily: FONT_BOLD, fontWeight: 700 }}>H1</span>
+            </ToolButton>
+            <ToolButton label="Subheading" active={active.h2} onPress={() => apply('h2')}>
+              <span style={{ fontFamily: FONT_BOLD, fontWeight: 700, fontSize: 13 }}>H2</span>
+            </ToolButton>
+            <div style={styles.toolbarSpacer} />
+            <ToolButton label="Hide formatting" active={false} onPress={toggleTools} subtle>
+              <Chevron up />
+            </ToolButton>
+          </>
+        ) : (
+          <ToolButton label="Show formatting" active={false} onPress={toggleTools} subtle>
+            <span style={{ fontFamily: FONT_BOLD, fontWeight: 700, fontSize: 14 }}>Aa</span>
+            <Chevron />
+          </ToolButton>
+        )}
       </div>
 
       <div style={styles.editorWrap}>
@@ -163,9 +205,24 @@ export default function RichNoteEditor({ initialHtml, placeholder, onChangeHtml 
   );
 }
 
+function Chevron({ up = false }: { up?: boolean }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" style={{ marginLeft: up ? 0 : 4 }}>
+      <path
+        d={up ? 'M2.5 7.5 6 4l3.5 3.5' : 'M2.5 4.5 6 8l3.5-3.5'}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function ToolButton({
-  label, active, onPress, children,
-}: { label: string; active: boolean; onPress: () => void; children: ReactNode }) {
+  label, active, onPress, children, subtle = false,
+}: { label: string; active: boolean; onPress: () => void; children: ReactNode; subtle?: boolean }) {
   return (
     <button
       type="button"
@@ -174,7 +231,11 @@ function ToolButton({
       title={label}
       // Run on mousedown and cancel it so the editor keeps its focus and selection.
       onMouseDown={(e) => { e.preventDefault(); onPress(); }}
-      style={{ ...styles.button, ...(active ? styles.buttonActive : null) }}
+      style={{
+        ...styles.button,
+        ...(subtle ? styles.buttonSubtle : null),
+        ...(active ? styles.buttonActive : null),
+      }}
     >
       {children}
     </button>
@@ -199,6 +260,7 @@ const styles: Record<string, CSSProperties> = {
     flexShrink: 0,
   },
   toolbarGap: { width: 6 },
+  toolbarSpacer: { flex: 1 },
   button: {
     minWidth: 36,
     height: 32,
@@ -212,6 +274,13 @@ const styles: Record<string, CSSProperties> = {
     cursor: 'pointer',
     WebkitTapHighlightColor: 'transparent',
     touchAction: 'manipulation',
+  },
+  buttonSubtle: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'transparent',
+    color: MUTED,
   },
   buttonActive: {
     background: 'rgba(44,26,14,0.18)',
